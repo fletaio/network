@@ -118,6 +118,10 @@ func Dial(networkType, address string, localhost string) (net.Conn, error) {
 	}()
 	go func() {
 		cRead, cWrite = network.RegistDial(networkType, address, localhost)
+
+		delay := mockDelay(localhost, address)
+		time.Sleep(delay)
+
 		connected <- true
 	}()
 	select {

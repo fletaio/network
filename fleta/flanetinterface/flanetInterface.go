@@ -4,15 +4,11 @@ import (
 	"time"
 )
 
+//each node string
 const (
-	//GuardNode string
-	GuardNode = "GUARD_NODE"
-	//SeedNode string
-	SeedNode = "SEED_NODE"
-	//MasterNode string
-	MasterNode = "MASTER_NODE"
-	//NormalNode string
-	NormalNode = "NORMAL_NODE"
+	ObserverNode   = "OBSERVER_NODE"
+	FormulatorNode = "FORMULATOR_NODE"
+	NormalNode     = "NORMAL_NODE"
 )
 
 //Node is sample node struct

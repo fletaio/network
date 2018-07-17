@@ -1,20 +1,22 @@
 package fleta
 
 import (
+	"fleta/formulator"
+	"fleta/minninggroup"
+	"fleta/observernode"
+	"fleta/peerlist"
 	"sync"
 
 	"fleta/flanet"
 	"fleta/flanetinterface"
-	"fleta/formulator"
-	"fleta/minninggroup"
+	"fleta/mock/mockblock"
 	"fleta/mock/network"
-	"fleta/peerlist"
 )
 
 //Fleta struct
 type Fleta struct {
 	FletaID int
-	Fn      flanet.Flanet
+	Fn      *flanet.Flanet
 	sync.Mutex
 }
 
@@ -23,32 +25,43 @@ func (f *Fleta) NewFleta() network.IFleta {
 	return &Fleta{}
 }
 
+func (f *Fleta) VisualizationData() map[string][]string {
+	return f.Fn.VisualizationData()
+}
+
 //Start Fleta
-func (f *Fleta) Start(i int, nodeType string) {
+func (f *Fleta) Start(i int, nodeType string) error {
 	fn := flanet.NewFlanet(i, nodeType)
-	f.Fn = *fn
+	f.Fn = fn
 
-	// mg := minninggroup.MinningGroup{}
-	// f.Fn.SetMinninggroup(nodecommunicator.NodeCommunicator{&mg})
-	// mg.SetFlanet(&f.Fn)
+	if f.Fn.GetNodeType() == flanetinterface.ObserverNode {
+		o := observernode.New(fn)
+		fn.RegistCaster(o)
+		go o.ConnectObserver(i)
+	} else {
+		pl := peerlist.New(fn)
+		fn.RegistCaster(pl)
 
-	// fm := *formulator.NewFormulator(fn.CastRouter, "FM", nodeType)
+		b := mockblock.New(fn)
+		fn.RegistCaster(b)
+		b.Start()
 
-	pl := *peerlist.New(fn, fn.CastRouter, nodeType)
-	fn.PutNetCaster(&pl.NetCaster)
+		fm := formulator.New(fn)
+		fn.RegistCaster(fm)
+		fm.Start()
 
-	if f.Fn.GetNodeType() == flanetinterface.MasterNode || f.Fn.GetNodeType() == flanetinterface.NormalNode {
-		go pl.RenewPeerList()
-	}
-	if f.Fn.GetNodeType() == flanetinterface.MasterNode {
-		mg := *minninggroup.New(fn, fn.CastRouter, nodeType)
-		fn.PutNetCaster(&mg.NetCaster)
-
-		fm := *formulator.New(fn, fn.CastRouter, nodeType)
-		fn.PutNetCaster(&fm.NetCaster)
-		go fm.RenewScore()
+		if f.Fn.GetNodeType() == flanetinterface.FormulatorNode {
+			mg := minninggroup.New(fn)
+			fn.RegistCaster(mg)
+			go mg.RenewScore()
+			go pl.RenewPeerList()
+		}
+		if f.Fn.GetNodeType() == flanetinterface.NormalNode {
+			go pl.RenewPeerList()
+		}
 	}
 
 	f.Fn.OpenFlanet()
+	return nil
 
 }

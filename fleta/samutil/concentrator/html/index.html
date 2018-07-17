@@ -1,0 +1,314 @@
+<html>
+<head>
+    <title>WebSocket demo</title>
+</head>
+<body>
+
+    <div>
+        <form>
+            <label for="numberfield">Number</label>
+            <input type="text" id="numberfield" placeholder="12"/><br />
+            <button type="button" id="sendBtn">Send</button>
+            <button type="button" id="connenctBtn">Connenct</button>
+        </form>
+    </div>
+    <div id="container"></div>
+    <div id="draw"></div>
+
+	<style>
+		.link {
+			fill: none;
+			stroke: #666;
+			stroke-width: 1.5px;
+		}
+
+		.node circle {
+			fill: #ccc;
+			stroke: #fff;
+			stroke-width: 1.5px;
+		}
+
+		text {
+			font: 10px sans-serif;
+			pointer-events: none;
+		}
+	</style>
+    <script type="text/javascript" src="/js/jquery/jquery-2.1.1.min.js"></script>
+    <script type="text/javascript" src="/js/d3.v3.min.js"></script>
+    <script type="text/javascript">
+        $(function () {
+            var ws;
+            var connection = false
+            if (window.WebSocket === undefined) {
+                $("#container").append("Your browser does not support WebSockets");
+                return;
+            } else {
+                ws = initWS();
+            }
+            function initWS() {
+                var socket = new WebSocket("ws://localhost:8080/ws"),
+                    container = $("#container")
+                socket.onopen = function() {
+                    connection = true
+                    container.html("<p>Socket is open</p>");
+                };
+                socket.onmessage = function (e) {
+					var data = JSON.parse(e.data)
+					var linkPLData = {};
+					for (nodeID in data) {
+						for (panel in data[nodeID]) {
+							var panelData = data[nodeID][panel]
+							if (typeof linkPLData[panel] === "undefined") {
+								linkPLData[panel] = []
+							}
+							for (plID in panelData) {
+								if (nodeID != panelData[plID]) {
+									linkPLData[panel].push({
+										source: nodeID,
+										target: panelData[plID]
+									});
+								}
+							}
+						}
+
+					}
+					// console.log(linkPLData)
+					for (panel in linkPLData) {
+						spreadMap(panel, linkPLData[panel])
+					}
+                    // container.html(JSON.stringify(linkPLData));
+                }
+                socket.onclose = function () {
+                    connection = false
+                    container.html("<p>Socket closed</p>");
+                }
+                return socket;
+            }
+
+            $("#connenctBtn").click(function (e) {
+                if (connection == false) {
+                    ws = initWS();
+                }
+            })
+            $("#sendBtn").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({ Num: parseInt($("#numberfield").val()) }));
+            });
+
+        })
+
+		var map = {}
+		var mapNodes = {}
+
+function spreadMap (caseId, links) {
+	// http://blog.thomsonreuters.com/index.php/mobile-patent-suits-graphic-of-the-day/
+	var nodes = {};
+	
+	// Compute the distinct nodes from the links.
+	links.forEach(function(link) {
+	  link.source = nodes[link.source] || (nodes[link.source] = {name: link.source});
+	  link.target = nodes[link.target] || (nodes[link.target] = {name: link.target});
+	});
+	
+	var width = $("body").width(),
+	    height = 900;
+	
+	var force = d3.layout.force()
+	    .nodes(d3.values(nodes))
+	    .links(links)
+	    .size([width, height])
+	    .linkDistance(Math.min(width/10, 100))
+	    .charge(-400)
+	    .on("tick", tick)
+	    .start();
+	
+	var svg = d3.select("#mapPageRepresentCase").append("svg")
+	    .attr("width", width)
+	    .attr("height", height);
+	
+	var link = svg.selectAll(".link")
+	    .data(force.links())
+	  .enter().append("line")
+	    .attr("class", "link");
+	
+	var node = svg.selectAll(".node")
+	    .data(force.nodes())
+	  .enter().append("g")
+	    .attr("class", "node")
+	    .on("mouseover", mouseover)
+	    .on("mouseout", mouseout)
+	    .on("dblclick", openPage)
+	    .call(force.drag);
+	
+	node.append("circle")
+	    .attr("r", 8);
+	
+	node.append("pageId")
+	    .attr("pageId", function(d) { return d.name; });
+	
+	node.append("text")
+	    .attr("x", 12)
+	    .attr("dy", ".35em")
+	    .text(function(d) { return d.name; });
+	
+	function tick() {
+	  link
+	      .attr("x1", function(d) { return d.source.x; })
+	      .attr("y1", function(d) { return d.source.y; })
+	      .attr("x2", function(d) { return d.target.x; })
+	      .attr("y2", function(d) { return d.target.y; });
+	
+	  node
+	      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+	}
+	
+	function openPage() {
+		location.href="#"+d3.select(this).select("text").text()+".page";
+	}
+	
+	function mouseover() {
+	  d3.select(this).select("circle").transition()
+	      .duration(750)
+	      .attr("r", 16);
+	}
+	
+	function mouseout() {
+	  d3.select(this).select("circle").transition()
+	      .duration(750)
+	      .attr("r", 8);
+	}
+	
+}
+
+		function spreadMap (caseId, links) {
+			// http://blog.thomsonreuters.com/index.php/mobile-patent-suits-graphic-of-the-day/
+			if (typeof mapNodes[caseId] === "undefined") {
+				mapNodes[caseId] = {
+					count: 0,
+					nodes : {},
+				}
+			}
+
+			if ( mapNodes[caseId].count == links.length) {
+				return
+			}
+			mapNodes[caseId].count = links.length
+
+			// Compute the distinct nodes from the links.
+			links.forEach(function(link) {
+				link.source = mapNodes[caseId].nodes[link.source] || (mapNodes[caseId].nodes[link.source] = {name: link.source});
+				link.target = mapNodes[caseId].nodes[link.target] || (mapNodes[caseId].nodes[link.target] = {name: link.target});
+			});
+
+			console.log(mapNodes[caseId])
+			
+			var width = $("body").width(),
+				height = 900;
+
+			if (typeof map[caseId] === "undefined") {
+				map[caseId] = d3.layout.force()
+					.nodes(d3.values(mapNodes[caseId].nodes))
+					.size([width, height])
+					.linkDistance(Math.min(width/2, 1000))
+					.charge(-400)
+					.on("tick", tick)
+					.links(links)
+					.start();
+				
+				mapNodes[caseId].svg = d3.select("#"+caseId).append("svg")
+					.attr("width", width)
+					.attr("height", height);
+				
+				mapNodes[caseId].link = mapNodes[caseId].svg.selectAll(".link");
+				
+				mapNodes[caseId].node = mapNodes[caseId].svg.selectAll(".node")
+				;
+				mapNodes[caseId].link.data(map[caseId].links())
+				.enter().append("line")
+					.attr("class", "link");
+				mapNodes[caseId].node.data(map[caseId].nodes())
+				.enter().append("g")
+					.attr("class", "node")
+					.on("mouseover", mouseover)
+					.on("mouseout", mouseout)
+					.on("dblclick", openPage)
+					.call(map[caseId].drag);				
+			} else {
+				map[caseId].nodes(d3.values(mapNodes[caseId].nodes)).links(links).start();
+			
+				mapNodes[caseId].svg.selectAll(".link").data(map[caseId].links())
+				mapNodes[caseId].svg.selectAll(".node").data(map[caseId].nodes())
+
+				// 			mapNodes[caseId].node.append("circle")
+				// .attr("r", 8);
+			
+				// mapNodes[caseId].node.append("pageId")
+				// 	.attr("pageId", function(d) { return d.name; });
+				
+				// mapNodes[caseId].node.append("text")
+				// 	.attr("x", 12)
+				// 	.attr("dy", ".35em")
+				// 	.text(function(d) { return d.name; });
+				
+				// function tick() {
+				// mapNodes[caseId].link
+				// 	.attr("x1", function(d) { return d.source.x; })
+				// 	.attr("y1", function(d) { return d.source.y; })
+				// 	.attr("x2", function(d) { return d.target.x; })
+				// 	.attr("y2", function(d) { return d.target.y; });
+				
+				// mapNodes[caseId].node
+				// 	.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+				// }
+				// return
+			}
+
+			console.log("length : " + $("#draw").find("#"+caseId).length)
+			if ($("#draw").find("#"+caseId).length ==0 ) {
+				$("#draw").append("<div id=\""+caseId+"\">")
+			}
+			
+
+			
+			mapNodes[caseId].node.append("circle")
+				.attr("r", 8);
+			
+			mapNodes[caseId].node.append("pageId")
+				.attr("pageId", function(d) { return d.name; });
+			
+			mapNodes[caseId].node.append("text")
+				.attr("x", 12)
+				.attr("dy", ".35em")
+				.text(function(d) { return d.name; });
+			
+			function tick() {
+				mapNodes[caseId].link
+					.attr("x1", function(d) { return d.source.x; })
+					.attr("y1", function(d) { return d.source.y; })
+					.attr("x2", function(d) { return d.target.x; })
+					.attr("y2", function(d) { return d.target.y; });
+				
+				mapNodes[caseId].node
+					.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+			}
+			
+			function openPage() {
+				location.href="#"+d3.select(this).select("text").text()+".page";
+			}
+			
+			function mouseover() {
+			d3.select(this).select("circle").transition()
+				.duration(750)
+				.attr("r", 16);
+			}
+			
+			function mouseout() {
+			d3.select(this).select("circle").transition()
+				.duration(750)
+				.attr("r", 8);
+			}
+			
+		}
+    </script>
+</body>
+</html>

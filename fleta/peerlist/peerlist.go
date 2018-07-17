@@ -10,42 +10,42 @@ import (
 
 	"fleta/flanetinterface"
 	"fleta/mock/mocknet"
-	"fleta/util"
-	"fleta/util/netcaster"
+	util "fleta/samutil"
+	"fleta/samutil/concentrator"
 )
 
 //PeerList is sample peerlist struct
 type PeerList struct {
 	peerMap *sync.Map
 	connMap *sync.Map
-	pi      PeerListImpl
-	netcaster.NetCaster
+	fi      FlanetImpl
+	concentrator.Caster
 }
 
-var peerListSize = 25
+var peerListSize = 15
+
+//error message list
 var (
 	ErrPeerNotExist = errors.New("ErrPeerNotExist")
 	ErrConnNotExist = errors.New("ErrConnNotExist")
 	ErrConnNotValid = errors.New("ErrConnNotValid")
 )
 
-func Location() string {
+//Location character of NetCaster
+func (pl PeerList) Location() string {
 	return "PL"
-}
-func (pl *PeerList) Location() string {
-	return Location()
 }
 
 //New TODO
-func New(pi PeerListImpl, cr *netcaster.CastRouter, hint string) *PeerList {
+func New(fi FlanetImpl) *PeerList {
 	pl := &PeerList{}
 	pl.peerMap = &sync.Map{}
 	pl.connMap = &sync.Map{}
-	pl.pi = pi
+	pl.fi = fi
 
-	pl.NetCaster = netcaster.NetCaster{
-		pl, cr, hint,
-	}
+	pl.Caster.Init(pl)
+
+	pl.addProcessCommand()
 
 	return pl
 }
@@ -63,12 +63,16 @@ func mapLen(m *sync.Map) int {
 func (pl *PeerList) RenewPeerList() {
 	for {
 		plen := mapLen(pl.peerMap)
-		if plen == 0 {
-			pl.requestPeerList()
-			time.Sleep(time.Second * 1)
-		} else if plen < peerListSize {
-			pl.requestPeerList()
-			time.Sleep(time.Second * 5)
+		if plen < peerListSize {
+			err := pl.requestPeerList()
+			if err != nil {
+				pl.Error("%s", err)
+			}
+			if plen == 0 {
+				time.Sleep(time.Second * 1)
+			} else {
+				time.Sleep(time.Second * 5)
+			}
 		} else {
 			pl.Log("plen : %d", plen)
 			break
@@ -77,31 +81,34 @@ func (pl *PeerList) RenewPeerList() {
 }
 
 func (pl *PeerList) requestPeerList() error {
-	conn, err := mocknet.Dial("tcp", util.Sha256HexInt(0), pl.Localhost())
+	seedAddr, err := pl.fi.SeedNodeAddr()
 	if err != nil {
 		return err
 	}
-	readyToReadChan := make(chan bool, 256)
+	conn, err := mocknet.Dial("tcp", seedAddr, pl.Localhost())
+	if err != nil {
+		return err
+	}
+	readyCh, pChan, _ := util.ReadFletaPacket(conn)
 	go func() {
-		fChan := make(chan util.FletaPacket, 1)
-		go util.ReadLoopFletaPacket(fChan, conn, readyToReadChan)
-		fp := <-fChan
-		if fp.Command != "" {
-			pl.ProcessPacket(conn, fp)
-		}
+		fp := <-pChan
+		_, err := pl.RunCommand(conn, fp)
 		conn.Close()
+		if err != nil {
+			pl.Error("%s fp : %s", err, fp)
+		}
 	}()
 
 	fletaPacket := util.FletaPacket{
 		Command: "PLRTRQPL",
-		Content: pl.Hint,
+		Content: pl.GetHint(),
 	}
 
 	p, err := fletaPacket.Packet()
 	if err != nil {
 		return err
 	}
-	<-readyToReadChan
+	<-readyCh
 	conn.Write(p)
 	return nil
 }
@@ -139,17 +146,15 @@ func (pl *PeerList) addConn(conn net.Conn) {
 
 //readPacket is push peerlist
 func (pl *PeerList) readPacket(conn net.Conn) {
-	readyToReadChan := make(chan bool)
-	fChan := make(chan util.FletaPacket, 1)
-	go util.ReadLoopFletaPacket(fChan, conn, readyToReadChan)
-	<-readyToReadChan
+	readyCh, pChan, exitChan := util.ReadFletaPacket(conn)
+	<-readyCh
 	for {
-		fp := <-fChan
-		if fp.Command == "" {
-			break
+		fp := <-pChan
+		exit, err := pl.RunCommand(conn, fp)
+		if err != nil {
+			pl.Error("%s", err)
 		}
-		pl.ProcessPacket(conn, fp)
-
+		exitChan <- exit
 	}
 
 }
@@ -157,20 +162,46 @@ func (pl *PeerList) readPacket(conn net.Conn) {
 //PushPeerList is push peerlist
 func (pl *PeerList) PushPeerList(peerlist []flanetinterface.Node) {
 	for _, node := range peerlist {
-		if node.NodeType == flanetinterface.MasterNode {
-			pl.pi.DetectMasterNode(node)
+		if node.NodeType == flanetinterface.FormulatorNode {
+			err := pl.fi.DetectFormulatorNode(node)
+			if err != nil {
+				pl.Error("%s", err)
+			}
 		}
 
 		if _, ok := pl.peerMap.Load(node.Address); !ok {
 			pl.peerMap.Store(node.Address, node)
-			if pl.Hint != flanetinterface.SeedNode {
+			if mapLen(pl.peerMap) < peerListSize {
 				go pl.makeConn(node.Address)
-				if mapLen(pl.peerMap) >= peerListSize {
-					break
-				}
 			}
 		}
 	}
+}
+
+//BroadCastToFormulator is broadcast to formulator
+func (pl *PeerList) BroadCastToFormulator(fp util.FletaPacket) error {
+	conTarget := map[string]bool{}
+	p, err := fp.Packet()
+	if err != nil {
+		return err
+	}
+	pl.connMap.Range(func(key, value interface{}) bool {
+		if conn, ok := value.(net.Conn); ok {
+			if nodeInter, ok := pl.peerMap.Load(key); ok {
+				if node, ok := nodeInter.(flanetinterface.Node); ok {
+					if node.Type() == flanetinterface.FormulatorNode {
+						key := fmt.Sprintf("%s%s", conn.LocalAddr().String(), conn.RemoteAddr().String())
+						if _, ok := conTarget[key]; !ok {
+							conTarget[key] = true
+							conn.Write(p)
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	return nil
 }
 
 //GetConnList is get conn obj
@@ -190,21 +221,42 @@ func (pl *PeerList) GetConnList() []net.Conn {
 
 	return conns
 }
+func (pl *PeerList) VisualizationData() []string {
 
-//ProcessPacket is handling process packet
-func (pl *PeerList) ProcessPacket(conn net.Conn, p util.FletaPacket) error {
-	switch p.Command {
-	case "PLMAKECN":
+	values := make([]string, 0)
+	pl.peerMap.Range(func(key, value interface{}) bool {
+		if node, ok := value.(flanetinterface.Node); ok {
+			values = append(values, node.Addr())
+		}
+		return true
+	})
+	return values
+
+}
+
+func (pl *PeerList) addProcessCommand() {
+	pl.AddCommand("PLMAKECN", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
 		//shack hand
-	case "PLRTPELT":
+		return false, nil
+	})
+	pl.AddCommand("PLRTPELT", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
 		nodes := make([]flanetinterface.Node, 0)
-		util.FromJSON(&nodes, p.Content)
+		util.FromJSON(&nodes, fp.Content)
 		pl.PushPeerList(nodes)
-	case "PLRTRQPL":
+		return false, nil
+	})
+	pl.AddCommand("PLRTRQPL", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
 		addr := conn.RemoteAddr().String()
-		nodeType := p.Content
+		nodeType := fp.Content
 
-		_, ok := pl.peerMap.Load(addr)
+		_, ok := pl.peerMap.Load(pl.Localhost())
+		if !ok {
+			pl.PushPeerList([]flanetinterface.Node{flanetinterface.Node{
+				Address:  pl.Localhost(),
+				NodeType: pl.GetHint(),
+			}})
+		}
+		_, ok = pl.peerMap.Load(addr)
 		if !ok {
 			pl.PushPeerList([]flanetinterface.Node{flanetinterface.Node{
 				Address:  addr,
@@ -222,7 +274,7 @@ func (pl *PeerList) ProcessPacket(conn net.Conn, p util.FletaPacket) error {
 			p, _ := fp.Packet()
 			conn.Write(p)
 
-			return nil
+			return false, nil
 		}
 		nodeLen := peerListSize
 		if pplLen <= peerListSize {
@@ -255,33 +307,30 @@ func (pl *PeerList) ProcessPacket(conn net.Conn, p util.FletaPacket) error {
 			arrNode = append(arrNode, node)
 		}
 
-		fp := util.FletaPacket{
+		sendfp := util.FletaPacket{
 			Command:     "PLRTPELT",
 			Compression: false,
 			Content:     util.ToJSON(arrNode),
 		}
-		p, _ := fp.Packet()
+		p, _ := sendfp.Packet()
 		conn.Write(p)
-	default:
-		cs := pl.LocalRouter(p.Command[:2])
-		if cs != nil {
-			return cs.ProcessPacket(conn, p)
-		}
-	}
-	return nil
+		return false, nil
+	})
 }
 
-//PeerListImpl TODO
-type PeerListImpl interface {
-	NewPeer(address string)
-	DetectMasterNode(flanetinterface.Node)
+//FlanetImpl TODO
+type FlanetImpl interface {
+	NewPeer(address string) error
+	DetectFormulatorNode(flanetinterface.Node) error
+	SeedNodeAddr() (string, error)
 }
 
-//IPeerList TODO
-type IPeerList interface {
-	PeerList() []flanetinterface.Node
-	Send(address string, fp util.FletaPacket) error
-}
+// //IPeerList TODO
+// type IPeerList interface {
+// 	PeerList() []flanetinterface.Node
+// 	Send(address string, fp util.FletaPacket) error
+// 	BroadCastToFormulator(fp util.FletaPacket) error
+// }
 
 //PeerList TODO
 func (pl *PeerList) PeerList() []flanetinterface.Node {

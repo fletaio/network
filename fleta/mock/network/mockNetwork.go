@@ -14,14 +14,16 @@ import (
 	"time"
 
 	"fleta/flanetinterface"
-	"fleta/mock/mockblock"
-	"fleta/util"
+	"fleta/mock"
+	util "fleta/samutil"
+	"fleta/samutil/concentrator"
 )
 
 //IFleta Fleta interface
 type IFleta interface {
-	Start(i int, nodeType string)
+	Start(i int, nodeType string) error
 	NewFleta() IFleta
+	VisualizationData() map[string][]string
 }
 
 var fletaTest IFleta
@@ -30,25 +32,6 @@ var fletaTest IFleta
 func Fleta(_fleta IFleta) {
 	fletaTest = _fleta
 }
-
-const (
-	guardNodeCount  = 0
-	seedNodeCount   = 1
-	masterNodeCount = 50
-	normalNodeCount = 0
-)
-
-const (
-	guardNodeStartIndex  = 0
-	seedNodeStartIndex   = guardNodeCount
-	masterNodeStartIndex = seedNodeStartIndex + seedNodeCount
-	normalNodeStartIndex = masterNodeStartIndex + masterNodeCount
-)
-
-const (
-	masterNodePeerSize = 3
-	peerSize           = 54
-)
 
 // NodeInfo has node infomation type, ID, data channel
 type NodeInfo struct {
@@ -81,100 +64,57 @@ func StoreNodeMap(key string, n NodeInfo) {
 
 //Run is start mocknetwork
 func Run() {
-	totalCount := guardNodeCount + seedNodeCount + masterNodeCount + normalNodeCount
-	i := 0
+	totalCount := simulationdata.ObserverNodeCount + simulationdata.FormulatorNodeCount + simulationdata.NormalNodeCount
 	for i := 0; i < totalCount; i++ {
 		appendNode(i)
 	}
-	for i = 0; i < totalCount; i++ {
+	for i := 0; i < totalCount; i++ {
 		go func(i int) {
-			LoadNodeMap(util.Sha256HexString(strconv.Itoa(i))).ft.Start(i, itoNodeType(i))
+			err := LoadNodeMap(util.Sha256HexInt(i)).ft.Start(i, itoNodeType(i))
+			if err != nil {
+				log.Fatal(err)
+			}
 		}(i)
 	}
 
-	// for j := seedNodeStartIndex; j < masterNodeStartIndex; j++ {
-	// 	go pushPeerList(j)
-	// }
+	for j := 0; j < totalCount; j++ {
+		go mockDataSend(j)
+	}
+
+	sender := make(chan concentrator.Visualization, 100)
+	go sendVisualizationData(sender)
+	concentrator.VisualizationStart(sender)
+}
+
+func sendVisualizationData(sender chan<- concentrator.Visualization) {
+	for {
+		time.Sleep(time.Second)
+
+		totalCount := simulationdata.ObserverNodeCount + simulationdata.FormulatorNodeCount + simulationdata.NormalNodeCount
+		data := make(map[string]map[string][]string)
+		for i := 0; i < totalCount; i++ {
+			idata := LoadNodeMap(util.Sha256HexInt(i)).ft.VisualizationData()
+			data[util.Sha256HexInt(i)] = idata
+		}
+		sender <- data
+
+	}
 }
 
 func itoNodeType(i int) string {
-	if i < seedNodeStartIndex {
-		return flanetinterface.GuardNode
-	} else if i < masterNodeStartIndex {
-		return flanetinterface.SeedNode
-	} else if i < normalNodeStartIndex {
-		return flanetinterface.MasterNode
+	if i < simulationdata.FormulatorNodeStartIndex {
+		return flanetinterface.ObserverNode
+	} else if i < simulationdata.NormalNodeStartIndex {
+		return flanetinterface.FormulatorNode
 	} else {
 		return flanetinterface.NormalNode
 	}
 }
 
-func pushPeerList(localhost string) error {
-	cRead, cWrite := RegistDial("tcp", localhost, localhost)
-
-	nodes := make([]flanetinterface.Node, 0)
-	totalCount := guardNodeCount
-	i := 0
-	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
-			Address:  util.Sha256HexString(strconv.Itoa(i)),
-			NodeType: flanetinterface.GuardNode,
-		}
-		nodes = append(nodes, node)
-	}
-	totalCount += seedNodeCount
-	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
-			Address:  util.Sha256HexString(strconv.Itoa(i)),
-			NodeType: flanetinterface.SeedNode,
-		}
-		nodes = append(nodes, node)
-	}
-	totalCount += masterNodeCount
-	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
-			Address:  util.Sha256HexString(strconv.Itoa(i)),
-			NodeType: flanetinterface.MasterNode,
-		}
-		nodes = append(nodes, node)
-	}
-	totalCount += normalNodeCount
-	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
-			Address:  util.Sha256HexString(strconv.Itoa(i)),
-			NodeType: flanetinterface.NormalNode,
-		}
-		nodes = append(nodes, node)
-	}
-
-	seri := util.ToJSON(nodes)
-
-	fp := util.FletaPacket{
-		Command:     "PLRTPELT",
-		Compression: false,
-		Content:     seri,
-	}
-
-	packet, err := fp.Packet()
-	if err != nil {
-		return err
-	}
-
-	cWrite.Write(packet)
-
-	if err := cWrite.Close(); err != nil {
-		return err
-	}
-	if err := cRead.Close(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func appendNode(i int) {
 	appendNodeAddress(itoNodeType(i), util.Sha256HexString(strconv.Itoa(i)))
 }
+
 func appendNodeAddress(nodeName string, addr string) {
 	nodeInfo := NodeInfo{
 		NodeType: nodeName,
@@ -182,17 +122,7 @@ func appendNodeAddress(nodeName string, addr string) {
 		ft:       fletaTest.NewFleta(),
 	}
 
-	if nodeName == flanetinterface.MasterNode {
-		mockblock.Generation(addr)
-	}
-
 	StoreNodeMap(nodeInfo.NodeID, nodeInfo)
-
-}
-
-// SeedNode test
-func SeedNode() NodeInfo {
-	return LoadNodeMap(util.Sha256HexInt(5))
 }
 
 func childIDGen(nodeID string, index int) string {
