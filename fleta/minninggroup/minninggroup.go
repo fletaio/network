@@ -1,16 +1,23 @@
 package minninggroup
 
 import (
+	"errors"
 	"net"
 	"sort"
 	"sync"
 	"time"
 
 	"fleta/flanetinterface"
-	"fleta/mock/mockblock"
+	"fleta/formulator"
 	"fleta/mock/mocknet"
 	util "fleta/samutil"
 	"fleta/samutil/concentrator"
+)
+
+//minninggroup error list
+var (
+	ErrNotFoundCommand = errors.New("NotFoundCommand")
+	ErrNotFoundConn    = errors.New("NotFoundConn")
 )
 
 //MinningGroupCount size of MinningGroup
@@ -18,13 +25,13 @@ const MinningGroupCount = 20
 
 //MinningGroup TODO
 type MinningGroup struct {
-	fi             FlanetImpl
-	imMinningGroup bool
-	myScore        int
-	GroupList      fList
-	checkGroupLock sync.Mutex
-	checkGroup     map[string]*flanetinterface.Node
-	conns          []net.Conn
+	fi        FlanetImpl
+	myScore   int
+	GroupLock sync.Mutex
+	GroupList fList
+	GroupMap  map[string]formulator.Node
+	connLock  sync.Mutex
+	conns     map[string]net.Conn
 	concentrator.Caster
 	requestBlockHeight int
 }
@@ -37,45 +44,57 @@ func (mg MinningGroup) Location() string {
 //New TODO
 func New(fi FlanetImpl) *MinningGroup {
 	mg := &MinningGroup{
-		checkGroup: make(map[string]*flanetinterface.Node),
+		GroupMap: make(map[string]formulator.Node),
+		conns:    make(map[string]net.Conn),
+		fi:       fi,
 	}
-	mg.fi = fi
 	mg.Caster.Init(mg)
-
-	mg.conns = make([]net.Conn, MinningGroupCount)
-
 	mg.addProcessCommand()
 
 	return mg
 }
 
-//RenewScore is renew formulator node score and spread to peerlist
-func (mg *MinningGroup) RenewScore() {
+func (mg *MinningGroup) checkMyScore() {
 	//TODO
+	localhost := mg.Localhost()
+	mg.myScore = mg.getScore(localhost)
+	if len(mg.GroupList) >= MinningGroupCount && mg.myScore <= MinningGroupCount {
+		mg.requestObserverAmIMinningGroup()
+	}
+
 }
 
-func (mg *MinningGroup) NewBlock(block *mockblock.Block) error {
-	mg.checkGroupLock.Lock()
-	var err error
-	if node, ok := mg.checkGroup[block.Addr]; ok {
-		node.BlockTime = block.MakeBlockTime
-		mg.reinsertSort(node)
-	} else {
-		err = mg.fi.CheckFormulator(block.Addr)
-	}
-	mg.checkGroupLock.Unlock()
-	return err
+func (mg *MinningGroup) requestObserverAmIMinningGroup() {
+	mg.start()
+	// mg.
 }
 
-func (mg *MinningGroup) NewFormulator(node *flanetinterface.Node) {
-	mg.checkGroupLock.Lock()
-	if _, ok := mg.checkGroup[node.Addr()]; !ok {
-		if time, err := mg.fi.GetMakeBlockTime(node.Addr()); err == nil {
-			node.BlockTime = time
-		}
-		mg.insertSort(node)
+// func (mg *MinningGroup) NewBlock(block *mockblock.Block) error {
+// 	mg.GroupLock.Lock()
+// 	defer mg.GroupLock.Unlock()
+// 	var err error
+// 	if node, ok := mg.GroupMap[block.Addr]; ok {
+// 		node.Block = block.MakeBlockTime
+// 		mg.reinsertSort(node)
+// 		mg.checkMyScore()
+// 	} else {
+// 		err = mg.fi.CheckFormulator(block.Addr)
+// 	}
+// 	return err
+// }
+
+//NewFormulator TODO
+func (mg *MinningGroup) NewFormulator(node flanetinterface.Node) {
+	mg.GroupLock.Lock()
+	defer mg.GroupLock.Unlock()
+	if _, ok := mg.GroupMap[node.Addr()]; !ok {
+		mg.insertSort(formulator.Node{
+			Address: node.Addr(),
+			// Detected: node.DetectedTime(),
+			// Block:    node.BlockTime(),
+		})
+		mg.checkMyScore()
 	}
-	mg.checkGroupLock.Unlock()
 }
 
 func (mg *MinningGroup) meshNetwork() {
@@ -84,89 +103,157 @@ func (mg *MinningGroup) meshNetwork() {
 	if mg.myScore < 0 || mg.myScore >= 20 {
 		return
 	}
-	mg.conns[mg.myScore] = nil
-	for index := mg.myScore + 1; index < mg.myScore+(MinningGroupCount/2); index++ {
-		i := (index + MinningGroupCount) % MinningGroupCount
-		conn, err := mocknet.Dial("tcp", mg.GroupList[i].Addr(), mg.Localhost())
-		if err == nil {
-			fp := util.FletaPacket{
-				Command: "MGEXLOOP",
-			}
-			p, err := fp.Packet()
+
+	mg.connLock.Lock()
+	addrList := make([]string, MinningGroupCount)
+
+	for i := mg.myScore + 1; i < MinningGroupCount; i++ {
+		addrList[i-mg.myScore-1] = mg.GroupList[i].Addr()
+	}
+	mg.connLock.Unlock()
+
+	for _, addr := range addrList {
+		if _, ok := mg.conns[addr]; !ok && addr != "" {
+			conn, err := mocknet.Dial("tcp", addr, mg.Localhost())
 			if err == nil {
-				conn.Write(p)
-				mg.SetConn(conn)
+				fp := util.FletaPacket{
+					Command: "MGEXLOOP",
+				}
+				p, err := fp.Packet()
+				if err == nil {
+					conn.Write(p)
+					mg.setConn(conn)
+				}
 			}
 		}
 	}
+
 }
 
-//SetConn TODO
-func (mg *MinningGroup) SetConn(conn net.Conn) {
-	index := mg.getScore(conn.RemoteAddr().String())
-	if index >= 0 && index < MinningGroupCount {
-		mg.conns[index] = conn
+func (mg *MinningGroup) setConn(conn net.Conn) {
+	mg.connLock.Lock()
+	if _conn, ok := mg.conns[conn.RemoteAddr().String()]; ok {
+		_conn.Close()
+	}
+	mg.conns[conn.RemoteAddr().String()] = conn
+	mg.connLock.Unlock()
+	go mg.readPacket(conn)
+}
+
+func (mg *MinningGroup) broadCastPacket(fp util.FletaPacket) error {
+	mg.connLock.Lock()
+	defer mg.connLock.Unlock()
+	for _, conn := range mg.conns {
+		p, err := fp.Packet()
+		if err != nil {
+			return err
+		}
+		conn.Write(p)
+		return nil
+	}
+	return ErrNotFoundConn
+}
+
+func (mg *MinningGroup) sendPacket(direct string, fp util.FletaPacket) error {
+	mg.connLock.Lock()
+	defer mg.connLock.Unlock()
+	if conn, ok := mg.conns[direct]; ok {
+		p, err := fp.Packet()
+		if err != nil {
+			return err
+		}
+		conn.Write(p)
+		return nil
+	}
+	return ErrNotFoundConn
+}
+
+func (mg *MinningGroup) readPacket(conn net.Conn) {
+	pChan, err := util.ReadFletaPacket(conn)
+	for {
+		fp, ok := <-pChan
+		if !ok {
+			mg.connLock.Lock()
+			delete(mg.conns, conn.RemoteAddr().String())
+			conn.Close()
+			mg.connLock.Unlock()
+			break
+		}
+		if err != nil {
+			mg.Error("%s", err)
+		}
+
+		if function := mg.GetCommands(fp.Command); function != nil {
+			function(conn, fp)
+		} else {
+			mg.Error("%s", ErrNotFoundCommand)
+		}
 	}
 
 }
 
-type fList []*flanetinterface.Node
+type fList []formulator.Node
 
 func (a fList) Len() int      { return len(a) }
 func (a fList) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
 //TODO add calculate block time
 func (a fList) Less(i, j int) bool {
-	iCom := a[i].BlockTime
-	if iCom.Before(a[i].DetectedTime) {
-		iCom = a[i].DetectedTime
-	}
-	jCom := a[j].BlockTime
-	if jCom.Before(a[j].DetectedTime) {
-		jCom = a[j].DetectedTime
-	}
-	return iCom.Before(jCom)
+	// iCom := a[i].Block
+	// if iCom.Before(a[i].Detected) {
+	// 	iCom = a[i].Detected
+	// }
+	// jCom := a[j].Block
+	// if jCom.Before(a[j].Detected) {
+	// 	jCom = a[j].Detected
+	// }
+	// return iCom.Before(jCom)
+	return false
 }
 
+//Review TODO
 type Review struct {
 	BlockHeight int
 	NodeInfos   []NodeForReview
 }
+
+//NodeForReview TODO
 type NodeForReview struct {
 	Addr string
 	Time time.Time
 }
 
-func (mg *MinningGroup) groupListIndex(el *flanetinterface.Node) int {
+func (mg *MinningGroup) groupListIndex(el formulator.Node) int {
 	index := sort.Search(len(mg.GroupList), func(i int) bool {
-		iCom := mg.GroupList[i].BlockTime
-		if iCom.Before(mg.GroupList[i].DetectedTime) {
-			iCom = mg.GroupList[i].DetectedTime
-		}
+		// iCom := mg.GroupList[i].Block
+		// if iCom.Before(mg.GroupList[i].Detected) {
+		// 	iCom = mg.GroupList[i].Detected
+		// }
 
-		jCom := el.BlockTime
-		if jCom.Before(el.DetectedTime) {
-			jCom = el.DetectedTime
-		}
+		// jCom := el.Block
+		// if jCom.Before(el.Detected) {
+		// 	jCom = el.Detected
+		// }
 
-		return iCom.Before(jCom)
+		// return iCom.Before(jCom)
+		return false
 	})
 
 	return index
 }
 
-func (mg *MinningGroup) reinsertSort(el *flanetinterface.Node) {
+func (mg *MinningGroup) reinsertSort(el formulator.Node) {
 	index := mg.groupListIndex(el)
 	mg.GroupList = append(mg.GroupList[:index], mg.GroupList[index+1:]...)
 	mg.insertSort(el)
 }
 
-func (mg *MinningGroup) insertSort(el *flanetinterface.Node) {
+func (mg *MinningGroup) insertSort(el formulator.Node) {
 	index := mg.groupListIndex(el)
-	mg.GroupList = append(mg.GroupList, &flanetinterface.Node{})
+	mg.GroupList = append(mg.GroupList, formulator.Node{})
 	copy(mg.GroupList[index+1:], mg.GroupList[index:])
 	mg.GroupList[index] = el
-	mg.checkGroup[el.Addr()] = el
+	mg.GroupMap[el.Addr()] = el
 }
 
 //CalculateScore TODO
@@ -185,7 +272,7 @@ func (mg *MinningGroup) CalculateScore() {
 			mg.Error("%s", err)
 			return
 		}
-		readyCh, pChan, _ := util.ReadFletaPacket(conn)
+		pChan, _ := util.ReadFletaPacket(conn)
 		go func() {
 			fp := <-pChan
 			//TODO
@@ -199,14 +286,14 @@ func (mg *MinningGroup) CalculateScore() {
 			BlockHeight: blockHeight,
 		}
 		for _, node := range minningCandidate {
-			iCom := node.BlockTime
-			if iCom.Before(node.DetectedTime) {
-				iCom = node.DetectedTime
-			}
+			// iCom := node.Block
+			// if iCom.Before(node.Detected) {
+			// 	iCom = node.Detected
+			// }
 
 			mcs.NodeInfos = append(mcs.NodeInfos, NodeForReview{
 				Addr: node.Addr(),
-				Time: iCom,
+				// Time: iCom,
 			})
 		}
 
@@ -217,7 +304,6 @@ func (mg *MinningGroup) CalculateScore() {
 
 		p, err := fletaPacket.Packet()
 		if err == nil {
-			<-readyCh
 			conn.Write(p)
 		}
 	}
@@ -235,64 +321,73 @@ func (mg *MinningGroup) getScore(addr string) int {
 }
 
 func (mg *MinningGroup) start() {
-	for {
-		mg.meshNetwork()
-		if mg.myScore == 0 {
-			mg.fi.MakeBlock()
-			mg.imMinningGroup = false
-			mg.Log("%s", mg.connsString())
-		}
-		time.Sleep(time.Second * 5)
+	mg.meshNetwork()
+	if mg.myScore == 0 {
+		mg.fi.MakeBlock()
+		mg.Log("%s", mg.connsString())
 	}
 }
 
 //connsString is handling process packet
 func (mg *MinningGroup) connsString() []string {
 	var connstr []string
-	for i := 0; i < MinningGroupCount; i++ {
-		if mg.conns[i] != nil {
-			connstr = append(connstr, mg.conns[i].RemoteAddr().String())
-		} else {
-			connstr = append(connstr, "empty")
-		}
+
+	mg.connLock.Lock()
+	defer mg.connLock.Unlock()
+	for conn := range mg.conns {
+		connstr = append(connstr, conn)
 	}
 	return connstr
 }
 
 func (mg *MinningGroup) addProcessCommand() {
 	mg.AddCommand("MGEXLOOP", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
-		mg.SetConn(conn)
+		mg.setConn(conn)
 		return true, nil
 	})
 }
 
 //GetConnList GetConnList
 func (mg *MinningGroup) GetConnList() []net.Conn {
-	return mg.conns
+	var conns []net.Conn
+
+	mg.connLock.Lock()
+	defer mg.connLock.Unlock()
+	for _, conn := range mg.conns {
+		conns = append(conns, conn)
+	}
+
+	return conns
 }
+
+//VisualizationData TODO
 func (mg *MinningGroup) VisualizationData() []string {
 	list := []string{}
-	for _, node := range mg.GroupList {
-		list = append(list, node.Addr())
+	mg.connLock.Lock()
+	defer mg.connLock.Unlock()
+	for _, conn := range mg.conns {
+		if conn != nil {
+			list = append(list, conn.RemoteAddr().String())
+		}
 	}
 	return list
 }
 
+//RegisteredRouter TODO
+func (mg *MinningGroup) RegisteredRouter() error {
+	return nil
+}
+
+//Close TODO
+func (mg *MinningGroup) Close() {
+}
+
 //FlanetImpl TODO
 type FlanetImpl interface {
-	FormulatorList() ([]*flanetinterface.Node, error)
+	// FormulatorList() ([]flanetinterface.Node, error)
 	MakeBlock() error
 	GetMakeBlockTime(addr string) (time.Time, error)
 	CheckFormulator(addr string) error
 	GetObserverNodeAddr() string
 	GetBlockHeight() int
-}
-
-//ImMinningGroup TODO
-func (mg *MinningGroup) ImMinningGroup() {
-	if mg.imMinningGroup == false {
-		mg.imMinningGroup = true
-		mg.start()
-	}
-
 }

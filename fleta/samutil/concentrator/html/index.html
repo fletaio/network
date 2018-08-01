@@ -7,15 +7,21 @@
     <div>
         <form>
             <label for="numberfield">Number</label>
-            <input type="text" id="numberfield" placeholder="12"/><br />
-            <button type="button" id="sendBtn">Send</button>
-            <button type="button" id="connenctBtn">Connenct</button>
+            <input type="text" id="numberfield" value="10"/><br />
+            <button type="button" id="empty">empty</button>
+            <button type="button" id="addFormulator">Add Formulator</button>
+            <button type="button" id="addNormalNode">Add NormalNode</button>
         </form>
     </div>
+	<div id="spreadTable"></div>
+	<div id="spreadTableHeight"></div>
     <div id="container"></div>
     <div id="draw"></div>
 
 	<style>
+		#spreadTableHeight {
+			height: 1px;
+		}
 		.link {
 			fill: none;
 			stroke: #666;
@@ -32,10 +38,85 @@
 			font: 10px sans-serif;
 			pointer-events: none;
 		}
+
+		#spreadTable div {
+			float: left;
+		}
+		#spreadTable > div > div:nth-child(1) {
+			background-color: aqua
+		}
+		#spreadTable > div > div:nth-child(2) {
+			background-color: coral
+		}
+		#spreadTable > div > div:nth-child(3) {
+			background-color: darkred
+		}
+		#spreadTable p {
+			width: 3px;
+			height: 3px;
+			overflow: hidden;
+			padding: 0;
+    		margin: 0;
+			border: 1px solid #000000;
+			cursor: default;
+		}
 	</style>
     <script type="text/javascript" src="/js/jquery/jquery-2.1.1.min.js"></script>
     <script type="text/javascript" src="/js/d3.v3.min.js"></script>
-    <script type="text/javascript">
+	<script type="text/javascript">
+	function toID (str, prefix) {
+		return prefix+str.replace(/[ \t]/ig, "_")
+	}
+	function buildSpreadTable (data) {
+		var $spreadTable = $("#spreadTable")
+		var d = Date()
+		for (p in data) {
+			var datap = data[p]
+			p = toID(p,"p")
+
+			var $p = $spreadTable.find("#"+p)
+			if ($p.length == 0) {
+				$p = $("<div id='"+p+"'>")
+				$spreadTable.append($p)
+			}
+
+			for (type in datap) {
+				var dataType = datap[type]
+				type = toID(type, "type")
+				var $t = $p.find("#"+type)
+				if ($t.length == 0) {
+					$t = $("<div id='"+type+"'>")
+					$p.append($t)
+				}
+
+				dataType.sort()
+				var $ps = $t.find("p")
+				$ps.each(function (i, e) {
+					var $e = $(e)
+					var eleId = $e.attr("id").replace("ele", "").replace(/_/gi, " ")
+					if (typeof dataType[eleId] === "undefined") {
+						$e.remove()
+					}
+				})
+
+				for (ele in dataType) {
+					var dataEle = dataType[ele]
+					ele = toID(ele, "ele")
+					var $e = $t.find("#"+ele)
+					if ($e.length == 0) {
+						$e = $("<p id='"+ele+"'>")
+						$t.append($e)
+					}
+					$e.attr("title", dataEle)
+				}
+			}
+
+		}
+		// $spreadTable.find("p[date!='"+d+"']").remove()
+		
+		$("#spreadTableHeight").height($spreadTable.height())
+	}
+	var roopCount = 0
         $(function () {
             var ws;
             var connection = false
@@ -55,13 +136,27 @@
                 socket.onmessage = function (e) {
 					var data = JSON.parse(e.data)
 					var linkPLData = {};
+					var summuryData = {};
+					var fullData = {};
+					var totalCount = {};
 					for (nodeID in data) {
+						summuryData[nodeID] = {}
+						fullData[nodeID] = {}
 						for (panel in data[nodeID]) {
+							if (typeof totalCount[panel] === "undefined") {
+								totalCount[panel] = 0
+							}
 							var panelData = data[nodeID][panel]
+							if (panelData !== null) {
+								totalCount[panel] += panelData.length
+								summuryData[nodeID][panel] = panelData.length
+								fullData[nodeID][panel] = []
+							}
 							if (typeof linkPLData[panel] === "undefined") {
 								linkPLData[panel] = []
 							}
 							for (plID in panelData) {
+								fullData[nodeID][panel].push(panelData[plID])
 								if (nodeID != panelData[plID]) {
 									linkPLData[panel].push({
 										source: nodeID,
@@ -72,11 +167,14 @@
 						}
 
 					}
-					// console.log(linkPLData)
 					for (panel in linkPLData) {
 						spreadMap(panel, linkPLData[panel])
 					}
-                    // container.html(JSON.stringify(linkPLData));
+
+					buildSpreadTable(fullData)
+					// d = JSON.stringify(summuryData)
+                    // container.html((roopCount++)+"<br/>"+JSON.stringify(totalCount)+"<br/>"+d.replace(/},\"/gi, "},<br/>\""));
+                    container.html((roopCount++)+"<br/>"+JSON.stringify(totalCount));
                 }
                 socket.onclose = function () {
                     connection = false
@@ -85,14 +183,29 @@
                 return socket;
             }
 
-            $("#connenctBtn").click(function (e) {
-                if (connection == false) {
-                    ws = initWS();
-                }
-            })
-            $("#sendBtn").click(function (e) {
+            $("#empty").click(function (e) {
                 e.preventDefault();
-                ws.send(JSON.stringify({ Num: parseInt($("#numberfield").val()) }));
+                ws.send(JSON.stringify({
+					Command: "empty",
+					Num: parseInt($("#numberfield").val())
+				}));
+                // if (connection == false) {
+                //     ws = initWS();
+                // }
+            })
+            $("#addFormulator").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "addFormulator",
+					Num: parseInt($("#numberfield").val())
+				}));
+            });
+            $("#addNormalNode").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "addNormalNode",
+					Num: parseInt($("#numberfield").val()) 
+				}));
             });
 
         })
@@ -200,7 +313,6 @@ function spreadMap (caseId, links) {
 				link.target = mapNodes[caseId].nodes[link.target] || (mapNodes[caseId].nodes[link.target] = {name: link.target});
 			});
 
-			console.log(mapNodes[caseId])
 			
 			var width = $("body").width(),
 				height = 900;
@@ -263,7 +375,6 @@ function spreadMap (caseId, links) {
 				// return
 			}
 
-			console.log("length : " + $("#draw").find("#"+caseId).length)
 			if ($("#draw").find("#"+caseId).length ==0 ) {
 				$("#draw").append("<div id=\""+caseId+"\">")
 			}

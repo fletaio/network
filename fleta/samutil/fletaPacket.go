@@ -172,13 +172,12 @@ func FromJSON(m interface{}, str string) interface{} {
 }
 
 //ReadLoopFletaPacket TODO
-func ReadLoopFletaPacket(pChan chan<- FletaPacket, conn net.Conn, readyToReadChan chan<- bool, exitGo <-chan bool) {
+func ReadLoopFletaPacket(pChan chan<- FletaPacket, conn net.Conn, exitGo <-chan bool) {
 	var size = -1
 	var buf, packetBuf []byte
 	var packetEnd = false
 
 	tmp := make([]byte, 256)
-	readyToReadChan <- true
 	for {
 		n, err := conn.Read(tmp)
 		if err != nil {
@@ -233,6 +232,7 @@ func ReadLoopFletaPacket(pChan chan<- FletaPacket, conn net.Conn, readyToReadCha
 			select {
 			case exit := <-exitGo:
 				if exit {
+					close(pChan)
 					return
 				}
 			}
@@ -243,16 +243,16 @@ func ReadLoopFletaPacket(pChan chan<- FletaPacket, conn net.Conn, readyToReadCha
 		}
 
 	}
+
 }
 
 //ReadFletaPacket TODO
-func ReadFletaPacket(conn net.Conn) (readyCh chan bool, fpCh chan FletaPacket, exitCh chan bool) {
-	readyToReadChan := make(chan bool)
+func ReadFletaPacket(conn net.Conn) (fpCh chan FletaPacket, exitCh chan bool) {
 	pChan := make(chan FletaPacket, 1)
 	exitChan := make(chan bool, 1)
 
-	go ReadLoopFletaPacket(pChan, conn, readyToReadChan, exitChan)
+	go ReadLoopFletaPacket(pChan, conn, exitChan)
 
-	return readyToReadChan, pChan, exitChan
+	return pChan, exitChan
 
 }

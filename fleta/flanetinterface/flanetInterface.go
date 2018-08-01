@@ -1,8 +1,6 @@
 package flanetinterface
 
-import (
-	"time"
-)
+import "time"
 
 //each node string
 const (
@@ -11,18 +9,16 @@ const (
 	NormalNode     = "NORMAL_NODE"
 )
 
-//Node is sample node struct
-type Node struct {
-	ID           int
-	Address      string
-	NodeType     string
-	DetectedTime time.Time
-	BlockTime    time.Time
-}
+//port info
+const (
+	PeerPort         = 3000
+	MinningGroupPort = 3001
+)
 
-func (n *Node) Addr() string {
-	return n.Address
-}
-func (n *Node) Type() string {
-	return n.NodeType
+//Node is sample node struct
+type Node interface {
+	Addr() string
+	Type() string
+	DetectedTime() time.Time
+	BlockTime() time.Time
 }

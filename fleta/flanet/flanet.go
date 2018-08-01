@@ -1,20 +1,26 @@
 package flanet
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"math/rand"
-	"sync"
+	"strconv"
+	"strings"
 	"time"
 
+	"fleta/flanet/flanetwork"
+	"fleta/flanet/hardstate"
 	"fleta/flanetinterface"
 	"fleta/formulator"
+	"fleta/message"
 	"fleta/minninggroup"
 	"fleta/mock"
 	"fleta/mock/mockblock"
 	"fleta/mock/mocknet"
-	"fleta/peerlist"
+	"fleta/packet"
+	"fleta/peer"
 	util "fleta/samutil"
-	"fleta/samutil/concentrator"
 )
 
 //flanet error list
@@ -24,20 +30,121 @@ var (
 
 //Flanet is gateway of fleta
 type Flanet struct {
-	sync.Mutex
 	flanetID   int
 	flanetType string
-	concentrator.Router
+
+	hardstate hardstate.IHardState
+
+	mg   *minninggroup.MinningGroup
+	sync *mockblock.Sync
+	pm   *peer.PeerManager
+
+	msgChan chan message.Message
 }
 
 //NewFlanet is instance of flanet
-func NewFlanet(i int, nodeType string) *Flanet {
+func NewFlanet(i int, nodeType string) (*Flanet, error) {
 	f := &Flanet{
 		flanetID:   i,
 		flanetType: nodeType,
 	}
-	f.Router.Init(f, nodeType)
-	return f
+
+	h, err := hardstate.New(f, f.Localhost())
+	if err != nil {
+		return nil, err
+	}
+	f.hardstate = h
+
+	return f, nil
+}
+
+func (f *Flanet) Minninggroup(minninggroup *minninggroup.MinningGroup) {
+	f.mg = minninggroup
+}
+func (f *Flanet) Sync(sync *mockblock.Sync) {
+	f.sync = sync
+	f.touchSeedNode()
+}
+func (f *Flanet) PeerManager(pm *peer.PeerManager) {
+	f.pm = pm
+}
+
+func (f *Flanet) VisualizationData() map[string][]string {
+	data := make(map[string][]string)
+
+	data["HSS"] = *f.hardstate.FormulatorList()
+	data["HSS candidate"] = f.hardstate.CandidateList()
+	if f.pm != nil {
+		data["PEER"] = f.pm.PeerAddrList()
+	}
+	return data
+}
+
+func (f *Flanet) touchSeedNode() {
+	addr, err := f.sync.SeedNodeAddr()
+	if err != nil {
+		f.Error("err : %s", err)
+		return
+	}
+	f.DialTo(addr)
+}
+
+//Close Close obj
+func (f *Flanet) flanetConsumer(msg message.Message) {
+	mType, err := flanetwork.TypeOfMessage(msg)
+	if err != nil {
+		f.Error("err : %s", err)
+		return
+	}
+	switch mType {
+	case flanetwork.FormulatorListMessageType:
+		if fl, ok := msg.(*flanetwork.FormulatorList); ok {
+			if len(fl.List) > 1 {
+				f.Debug("%d", len(fl.List))
+			}
+			for _, l := range fl.List {
+				f.hardstate.NewNode(l)
+			}
+
+		}
+	case flanetwork.AskFormulatorMessageType:
+		localPeerAddr := f.Localhost() + ":" + strconv.Itoa(flanetinterface.PeerPort)
+		af := flanetwork.NewAnswerFormulator(localPeerAddr, f.GetNodeType())
+
+		payload := message.ToPayload(flanetwork.AnswerFormulatorMessageType, af)
+
+		addr := msg.(*flanetwork.AskFormulator).Addr
+		f.DialTo(addr)
+		err := f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
+		if err != nil {
+			f.pm.Delete(peer.NodeID(addr))
+			if err == io.ErrClosedPipe {
+			} else {
+				f.Error("err : %s", err)
+			}
+		}
+
+	case flanetwork.AnswerFormulatorMessageType:
+		addr := msg.(*flanetwork.AnswerFormulator).Addr
+		nodeType := msg.(*flanetwork.AnswerFormulator).NodeType
+		f.hardstate.AnswerFormulator(addr, nodeType)
+		f.pm.SetlimitPeerSize(len(*f.hardstate.FormulatorList()) / 3)
+	}
+}
+
+//Close Close obj
+func (f *Flanet) FlanetConsumer(msgChan chan message.Message) {
+	f.msgChan = msgChan
+	go func() {
+		for {
+			msg := <-msgChan
+			go f.flanetConsumer(msg)
+		}
+	}()
+}
+
+//Close Close obj
+func (f *Flanet) Close() {
 }
 
 //GetNodeType return node type
@@ -55,169 +162,142 @@ func (f *Flanet) Localhost() string {
 	return util.Sha256HexInt(f.flanetID)
 }
 
+//DialTo is wait of all accept
+func (f *Flanet) DialTo(addr string) error {
+	if addr == "" {
+		return nil
+	}
+	if !strings.Contains(addr, ":") {
+		addr += ":" + strconv.Itoa(flanetinterface.PeerPort)
+	}
+	nodeID := peer.NodeID(addr)
+	_, err := f.pm.GetPeer(nodeID)
+	if err != nil {
+		if err == peer.ErrPeerNotExist {
+			conn, err := mocknet.Dial("tcp", addr, f.Localhost()+":"+strconv.Itoa(flanetinterface.PeerPort))
+			if err != nil {
+				f.Error("err : %s", err)
+				return err
+			}
+			addr = conn.RemoteAddr().String()
+			err = f.pm.AddPeer(peer.NodeID(addr), conn)
+			if err != nil {
+				f.Error("err : %s", err)
+			}
+			f.hardstate.NewNode(addr)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 //OpenFlanet is wait of all accept
 func (f *Flanet) OpenFlanet() error {
-	listen, err := mocknet.Listen("tcp", ":3000")
+	listen, err := mocknet.Listen("tcp", ":"+strconv.Itoa(flanetinterface.PeerPort))
 	if err != nil {
 		return err
 	}
-	ls := listen
-
+	// f.Log("listen addr : %s", listen.Addr().String())
 	for {
-		conn, err := ls.Accept()
+		conn, err := listen.Accept()
 		if err != nil {
 			continue
 		}
-		go f.CommandRouter(conn)
+		addr := conn.RemoteAddr().String()
+		err = f.pm.AddPeer(peer.NodeID(addr), conn)
+		if err != nil {
+			f.Error("err : %s", err)
+			conn.Close()
+			continue
+		}
+		f.hardstate.NewNode(addr)
 	}
 
 }
 
 //TODO MOCK DATA
 func (f *Flanet) GetObserverNodeAddr() string {
+	rand.Seed(time.Now().Unix())
 	from := simulationdata.ObserverNodeStartIndex
 	to := simulationdata.ObserverNodeStartIndex + simulationdata.ObserverNodeCount
 	targetID := rand.Intn(to-from) + from
 	return util.Sha256HexInt(targetID)
 }
 
-//IFormulator is requested to implement a list of Formulator functions
-type IFormulator interface {
-	concentrator.ConnStore
-	DetectFormulatorNode(node flanetinterface.Node)
-	NewPeer(address string)
-	FormulatorList() ([]*flanetinterface.Node, error)
-	SelfNode() *flanetinterface.Node
-	CheckFormulator(addr string) error
+//SaveNewNode TODO
+func (f *Flanet) SaveNewNode(addr string) ([]byte, error) {
+	node := &formulator.Node{
+		Address: addr,
+		// Detected: time.Now(),
+	}
+	if f.mg != nil {
+		f.mg.NewFormulator(node)
+	}
+	var buffer bytes.Buffer
+	if _, err := node.WriteTo(&buffer); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
-func (f *Flanet) formulator() (IFormulator, error) {
-	var i IFormulator
-	i = &formulator.Formulator{}
-	connStore := f.LocalRouter(i.Location())
-	if cs, ok := connStore.(IFormulator); ok {
-		return cs, nil
+//SpreadNewNodes TODO
+func (f *Flanet) SpreadNewNodes(addr string) ([]string, error) {
+	responseList := flanetwork.NewFormulatorList([]string{addr})
+	payload := message.ToPayload(flanetwork.FormulatorListMessageType, responseList)
+
+	nodeIDs := f.pm.Broadcast(&payload)
+
+	spreadedList := make([]string, len(nodeIDs))
+	for i, spreaded := range nodeIDs {
+		spreadedList[i] = string(spreaded)
 	}
-	return nil, ErrUnregisteredCaster
+
+	return spreadedList, nil
+}
+
+//AskFormulator check the target node is formulator
+func (f *Flanet) AskFormulator(addr string) (isLocalhost bool) {
+	localhost := f.Localhost() + ":" + strconv.Itoa(flanetinterface.PeerPort)
+	if addr == localhost {
+		return true
+	}
+	askf := flanetwork.NewAskFormulator(localhost)
+	payload := message.ToPayload(flanetwork.AskFormulatorMessageType, askf)
+
+	f.DialTo(addr)
+	// f.Log("AskFormulator to %s", addr)
+	f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
+	return false
+}
+
+//SendToNodeList TODO
+func (f *Flanet) SendToNodeList(addr string, list []string) error {
+
+	responseList := flanetwork.NewFormulatorList(list)
+	payload := message.ToPayload(flanetwork.FormulatorListMessageType, responseList)
+
+	f.DialTo(addr)
+	f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
+
+	return nil
 }
 
 /*
 Formulator Impls
 */
-func (f *Flanet) DetectFormulatorNode(node flanetinterface.Node) error {
-	fm, err := f.formulator()
-	if err != nil {
-		return err
-	}
-	fm.DetectFormulatorNode(node)
-	return nil
-}
+func (f *Flanet) SetBlockTime(addr string, t time.Time) error {
+	return f.hardstate.UpdateNode(addr, func(v []byte) ([]byte, error) {
+		var node *formulator.Node
 
-func (f *Flanet) NewPeer(peer string) error {
-	fm, err := f.formulator()
-	if err != nil {
-		return err
-	}
-	fm.NewPeer(peer)
-	return nil
-}
-
-func (f *Flanet) FormulatorList() ([]*flanetinterface.Node, error) {
-	fm, err := f.formulator()
-	if err != nil {
-		return nil, err
-	}
-	return fm.FormulatorList()
-}
-
-func (f *Flanet) CheckFormulator(addr string) error {
-	fm, err := f.formulator()
-	if err != nil {
-		return err
-	}
-	return fm.CheckFormulator(addr)
-}
-
-//IPeerList is requested to implement a list of Peerlist functions
-type IPeerList interface {
-	concentrator.ConnStore
-	BroadCastToFormulator(fp util.FletaPacket) error
-	PeerList() []flanetinterface.Node
-	PeerSend(address string, fp util.FletaPacket) error
-}
-
-func (f *Flanet) peerlist() (IPeerList, error) {
-	var i IPeerList
-	i = &peerlist.PeerList{}
-	connStore := f.LocalRouter(i.Location())
-	if cs, ok := connStore.(IPeerList); ok {
-		return cs, nil
-	}
-	return nil, ErrUnregisteredCaster
-
-}
-
-/*
-PeerList Impls
-*/
-func (f *Flanet) BroadCastToFormulator(fp util.FletaPacket) error {
-	p, err := f.peerlist()
-	if err != nil {
-		return err
-	}
-	return p.BroadCastToFormulator(fp)
-}
-
-func (f *Flanet) PeerList() ([]flanetinterface.Node, error) {
-	p, err := f.peerlist()
-	if err != nil {
-		return nil, err
-	}
-
-	return p.PeerList(), nil
-}
-
-func (f *Flanet) PeerSend(addr string, val util.FletaPacket) error {
-	p, err := f.peerlist()
-	if err != nil {
-		return err
-	}
-	return p.PeerSend(addr, val)
-}
-
-//IMinninggroup is requested to implement a list of Block functions
-type IMinningGroup interface {
-	concentrator.ConnStore
-	NewBlock(block *mockblock.Block) error
-	NewFormulator(node *flanetinterface.Node)
-}
-
-func (f *Flanet) minninggroup() (IMinningGroup, error) {
-	var i IMinningGroup
-	i = &minninggroup.MinningGroup{}
-	connStore := f.LocalRouter(i.Location())
-	if cs, ok := connStore.(IMinningGroup); ok {
-		return cs, nil
-	}
-	return nil, ErrUnregisteredCaster
-}
-
-func (f *Flanet) NewFormulator(node *flanetinterface.Node) error {
-	m, err := f.minninggroup()
-	if err != nil {
-		return err
-	}
-	m.NewFormulator(node)
-	return nil
-}
-
-func (f *Flanet) NewBlock(block *mockblock.Block) error {
-	m, err := f.minninggroup()
-	if err != nil {
-		return err
-	}
-
-	return m.NewBlock(block)
+		r := bytes.NewReader(v)
+		_, err := node.ReadFrom(r)
+		if err != nil {
+			return nil, err
+		}
+		// node.Block = t
+		return v, nil
+	})
 }
 
 /*
@@ -226,64 +306,38 @@ Block Impls
 
 //IBlock is requested to implement a list of Block functions
 type ISync interface {
-	concentrator.ConnStore
-	MakeBlock(node *flanetinterface.Node) error
+	MakeBlock(addr string) error
 	GetMakeBlockTime(addr string) (time.Time, error)
 	SeedNodeAddr() (string, error)
 	GetBlockHeight() int
-}
-
-func (f *Flanet) sync() (ISync, error) {
-	var i ISync
-	i = &mockblock.Sync{}
-	connStore := f.LocalRouter(i.Location())
-	if cs, ok := connStore.(ISync); ok {
-		return cs, nil
-	}
-	return nil, ErrUnregisteredCaster
 }
 
 /*
 Block Impls
 */
 func (f *Flanet) MakeBlock() error {
-	b, err := f.sync()
-	if err != nil {
-		return err
+	if f.sync != nil {
+		return f.sync.MakeBlock(f.Localhost())
 	}
-	fm, err := f.formulator()
-	if err != nil {
-		return err
-	}
-
-	node := fm.SelfNode()
-	b.MakeBlock(node)
-
 	return nil
 }
 
 func (f *Flanet) GetMakeBlockTime(addr string) (time.Time, error) {
-	b, err := f.sync()
-	if err != nil {
-		return time.Time{}, err
+	if f.sync != nil {
+		return f.sync.GetMakeBlockTime(addr)
 	}
-
-	return b.GetMakeBlockTime(addr)
+	return time.Time{}, nil
 }
 
 func (f *Flanet) SeedNodeAddr() (string, error) {
-	b, err := f.sync()
-	if err != nil {
-		return "", err
+	if f.sync != nil {
+		return f.sync.SeedNodeAddr()
 	}
-
-	return b.SeedNodeAddr()
+	return "", nil
 }
 func (f *Flanet) GetBlockHeight() int {
-	b, err := f.sync()
-	if err != nil {
-		return -1
+	if f.sync != nil {
+		return f.sync.GetBlockHeight()
 	}
-
-	return b.GetBlockHeight()
+	return -1
 }

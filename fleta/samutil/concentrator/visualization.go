@@ -9,20 +9,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type msg struct {
-	Num int
+type Msg struct {
+	Command string
+	Num     int
 }
 
 type Visualization map[string]map[string][]string
 
-var receiver <-chan Visualization
+var sender <-chan Visualization
+var receiver chan<- Msg
 
-func VisualizationStart(data <-chan Visualization) {
+func VisualizationStart(data <-chan Visualization, nodeAdder chan<- Msg) {
 	http.HandleFunc("/ws", wsHandler)
 	// http.HandleFunc("/", rootHandler)
 	http.Handle("/", http.FileServer(http.Dir("./fleta/samutil/concentrator/html/")))
 
-	receiver = data
+	sender = data
+	receiver = nodeAdder
 
 	panic(http.ListenAndServe(":8080", nil))
 }
@@ -46,14 +49,29 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
 	}
 
-	go echo(conn)
+	go read(conn)
+	go write(conn)
 }
 
-func echo(conn *websocket.Conn) {
+func read(conn *websocket.Conn) {
+	m := Msg{}
+
 	for {
-		data := <-receiver
+		err := conn.ReadJSON(&m)
+		if err != nil {
+			fmt.Println("Error reading json.", err)
+			break
+		}
+		receiver <- m
+	}
+}
+
+func write(conn *websocket.Conn) {
+	for {
+		data := <-sender
 		if err := conn.WriteJSON(data); err != nil {
 			fmt.Println(err)
+			break
 		}
 	}
 }

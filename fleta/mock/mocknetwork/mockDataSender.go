@@ -1,4 +1,4 @@
-package network
+package mocknetwork
 
 import (
 	"log"
@@ -29,7 +29,7 @@ func mockDataSend(index int) {
 
 func formulatorListSend(index int) {
 	localhost := util.Sha256HexInt(index)
-	cRead, cWrite := RegistDial("tcp", localhost, localhost)
+	conn := RegistDial("tcp", localhost, localhost)
 
 	log.Println("len :", len(fmList))
 	seri := util.ToJSON(fmList)
@@ -43,24 +43,18 @@ func formulatorListSend(index int) {
 	if packet, err := fp.Packet(); err != nil {
 		log.Fatal(err)
 	} else {
-		cWrite.Write(packet)
+		conn.Write(packet)
 	}
 
-	if err := cWrite.Close(); err != nil {
-		log.Fatal(err)
-	}
-	if err := cRead.Close(); err != nil {
-		log.Fatal(err)
-	}
-
+	conn.Close()
 }
 
 func peerlistSend(index int) {
-	nodes := make([]flanetinterface.Node, 0)
+	nodes := make([]*NodeInfo, 0)
 	totalCount := simulationdata.ObserverNodeCount
 	i := 0
 	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
+		node := &NodeInfo{
 			Address:  util.Sha256HexString(strconv.Itoa(i)),
 			NodeType: flanetinterface.ObserverNode,
 		}
@@ -68,7 +62,7 @@ func peerlistSend(index int) {
 	}
 	totalCount += simulationdata.FormulatorNodeCount
 	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
+		node := &NodeInfo{
 			Address:  util.Sha256HexString(strconv.Itoa(i)),
 			NodeType: flanetinterface.FormulatorNode,
 		}
@@ -76,7 +70,7 @@ func peerlistSend(index int) {
 	}
 	totalCount += simulationdata.NormalNodeCount
 	for ; i < totalCount; i++ {
-		node := flanetinterface.Node{
+		node := &NodeInfo{
 			Address:  util.Sha256HexString(strconv.Itoa(i)),
 			NodeType: flanetinterface.NormalNode,
 		}
@@ -96,10 +90,9 @@ func peerlistSend(index int) {
 		log.Println("err ", err)
 	}
 	localhost := util.Sha256HexInt(index)
-	cRead, cWrite := RegistDial("tcp", localhost, localhost)
+	conn := RegistDial("tcp", localhost, localhost)
 
-	cWrite.Write(packet)
+	conn.Write(packet)
 
-	cWrite.Close()
-	cRead.Close()
+	conn.Close()
 }

@@ -11,9 +11,7 @@ import (
 	"fleta/flanetinterface"
 	"fleta/mock"
 	"fleta/mock/mocknet"
-	"fleta/peerlist"
 	util "fleta/samutil"
-	"fleta/samutil/concentrator"
 )
 
 //error list
@@ -24,20 +22,23 @@ var (
 	ErrNotFoundSeedNode     = errors.New("Not Found SeedNode")
 )
 
+//Block TODO
 type Block struct {
 	MakeBlockTime time.Time
 	Height        int
 	Addr          string
 }
 
+//Sync TODO
 type Sync struct {
-	sync.RWMutex
-	fi           FlanetImpl
-	BlockList    []*Block
-	blockAddrMap map[string]*Block
-	concentrator.Caster
+	sync.Mutex
+	fi            FlanetImpl
+	BlockList     []*Block
+	tempBlockList []*Block
+	blockAddrMap  map[string]*Block
 }
 
+//New is new
 func New(fi FlanetImpl) *Sync {
 	s := &Sync{
 		BlockList:    make([]*Block, 0),
@@ -45,34 +46,47 @@ func New(fi FlanetImpl) *Sync {
 	}
 	s.fi = fi
 
-	s.Caster.Init(s)
+	// s.AddCommand("SYRSBLLS", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
+	// 	var blocks []*Block
+	// 	util.FromJSON(&blocks, fp.Content)
+	// 	s.Log("%s", blocks)
+	// 	if s.GetBlockHeight() == 0 {
+	// 		if blocks[0].Height == 0 {
+	// 			for _, b := range blocks {
+	// 				s.PushBlock(b)
+	// 			}
+	// 		} else {
+	// 			return false, ErrInvalidHeight
+	// 		}
+	// 	} else {
+	// 		for _, b := range blocks {
+	// 			s.PushBlock(b)
+	// 		}
 
-	s.AddCommand("SYRQBLLT", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
-		bLen := len(s.BlockList)
-		requestLen, err := strconv.Atoi(fp.Content)
-		if err != nil {
-			requestLen = 0
-		}
-		if bLen > requestLen {
-			fletaPacket := util.FletaPacket{
-				Command: "SYRSBLLS",
-				Content: util.ToJSON(s.BlockList[requestLen:]),
-			}
-			p, err := fletaPacket.Packet()
-			if err != nil {
-				return false, err
-			}
-			conn.Write(p)
-		}
-		return false, nil
-	})
+	// 	}
+	// 	return false, nil
+	// })
+	// s.AddCommand("SYRQBLLT", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
+	// 	bLen := len(s.BlockList)
+	// 	requestLen, err := strconv.Atoi(fp.Content)
+	// 	if err != nil {
+	// 		requestLen = 0
+	// 	}
+	// 	if bLen > requestLen {
+	// 		fletaPacket := util.FletaPacket{
+	// 			Command: "SYRSBLLS",
+	// 			Content: util.ToJSON(s.BlockList[requestLen:]),
+	// 		}
+	// 		p, err := fletaPacket.Packet()
+	// 		if err != nil {
+	// 			return false, err
+	// 		}
+	// 		conn.Write(p)
+	// 	}
+	// 	return false, nil
+	// })
 
 	return s
-}
-
-//Location TODO
-func (s Sync) Location() string {
-	return "SY"
 }
 
 //GetConnList TODO
@@ -80,6 +94,8 @@ func (s *Sync) GetConnList() []net.Conn {
 	conns := make([]net.Conn, 0)
 	return conns
 }
+
+//VisualizationData TODO
 func (s *Sync) VisualizationData() []string {
 	blen := len(s.BlockList)
 	if blen > 0 {
@@ -87,6 +103,15 @@ func (s *Sync) VisualizationData() []string {
 		return []string{fmt.Sprintf("%d %s", lastBlock.Height, lastBlock.Addr)}
 	}
 	return nil
+}
+
+//RegisteredRouter TODO
+func (s *Sync) RegisteredRouter() error {
+	return nil
+}
+
+//Close TODO
+func (s *Sync) Close() {
 }
 
 //Start TODO
@@ -102,31 +127,22 @@ func (s *Sync) Start() {
 //RequestBlock TODO
 func (s *Sync) RequestBlock() {
 	for {
-		list, err := s.fi.PeerList()
-		if err != nil {
-			s.Error("%s", err)
-		}
-		if len(list) > 0 {
-			break
-		}
-		time.Sleep(time.Second)
-	}
-
-	for {
+		currentHeight := len(s.BlockList)
 		fp := util.FletaPacket{
 			Command: "SYRQBLLT",
+			Content: strconv.Itoa(currentHeight),
 		}
-		if len(s.BlockList) == 0 {
-			addr, err := s.fi.SeedNodeAddr()
+		if currentHeight == 0 {
+			addr, err := s.SeedNodeAddr()
 			if err != nil {
-				s.Error("%s", err)
+				// s.Error("%s", err)
 				continue
 			}
-			conn, err := mocknet.Dial("tcp", addr, s.Localhost())
+			conn, err := mocknet.Dial("tcp", addr, s.fi.Localhost())
 			if err != nil {
 				continue
 			}
-			readyCh, pChan, _ := util.ReadFletaPacket(conn)
+			pChan, _ := util.ReadFletaPacket(conn)
 			go func() {
 				fp := <-pChan
 
@@ -147,35 +163,33 @@ func (s *Sync) RequestBlock() {
 
 			p, err := fp.Packet()
 			if err != nil {
-				s.Error("%s", err)
+				// s.Error("%s", err)
 				continue
 			}
-			<-readyCh
 			conn.Write(p)
 
 		} else {
-			s.ConsignmentCast(peerlist.PeerList{}.Location(), fp)
+			// s.ConsignmentCast(peerlist.PeerList{}.Location(), fp)
 		}
 
-		time.Sleep(time.Second * 3)
+		time.Sleep(time.Second * 30)
 	}
 }
 
 func (s *Sync) requestBlockFromObserver() error {
 	addr := s.fi.GetObserverNodeAddr()
 
-	conn, err := mocknet.Dial("tcp", addr, s.Localhost())
+	conn, err := mocknet.Dial("tcp", addr, s.fi.Localhost())
 	if err != nil {
 		return err
 	}
-	readyCh, pChan, _ := util.ReadFletaPacket(conn)
+	pChan, _ := util.ReadFletaPacket(conn)
 	go func() {
 		fp := <-pChan
 		if fp.Command == "SYRSGEBL" {
-			var block Block
+			var block *Block
 			util.FromJSON(&block, fp.Content)
-			s.Log("%s", block)
-			s.putGenesisBlock(block)
+			s.PushBlock(block)
 		}
 		conn.Close()
 	}()
@@ -188,7 +202,6 @@ func (s *Sync) requestBlockFromObserver() error {
 	if err != nil {
 		return err
 	}
-	<-readyCh
 	conn.Write(p)
 
 	return nil
@@ -202,24 +215,28 @@ func (s *Sync) putGenesisBlock(block Block) {
 
 // Height TODO
 func (s *Sync) Height() int {
-	s.RLock()
+	s.Lock()
 	height := s.BlockList[len(s.BlockList)-1].Height
-	s.RUnlock()
+	s.Unlock()
 	return height
 }
 
+//LastedBlock TODO
 func (s *Sync) LastedBlock() *Block {
 	index := len(s.BlockList) - 1
 	return s.BlockList[index]
 }
 
+//PushBlock TODO
 func (s *Sync) PushBlock(block *Block) bool {
+	s.Lock()
+	defer s.Unlock()
 	if block.Height == 0 {
 		s.pushBlock(block)
 		return true
 	}
 	if bb := s.BlockList[block.Height-1]; bb != nil {
-		if cb := s.BlockList[block.Height]; cb == nil {
+		if len(s.BlockList) == block.Height {
 			s.pushBlock(block)
 			return true
 		}
@@ -227,7 +244,10 @@ func (s *Sync) PushBlock(block *Block) bool {
 	return false
 }
 
-func (s *Sync) MakeBlock(node *flanetinterface.Node) error {
+//MakeBlock TODO
+func (s *Sync) MakeBlock(addr string) error {
+	s.Lock()
+	defer s.Unlock()
 	length := len(s.BlockList)
 	if length == 0 {
 		return ErrNotFoundGenesisBlock
@@ -236,13 +256,15 @@ func (s *Sync) MakeBlock(node *flanetinterface.Node) error {
 	if prevBlock.Height == length-1 {
 		block := &Block{
 			MakeBlockTime: time.Now(),
-			Addr:          node.Addr(),
+			Addr:          addr,
 			Height:        length,
 		}
 
 		s.pushBlock(block)
-		node.BlockTime = block.MakeBlockTime
-		//  = block.MakeBlockTime
+		err := s.fi.SetBlockTime(addr, block.MakeBlockTime)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -252,15 +274,18 @@ func (s *Sync) MakeBlock(node *flanetinterface.Node) error {
 //CheckBlock TODO check other block height
 func (s *Sync) pushBlock(block *Block) {
 	if block.Height == 0 {
+		s.blockAddrMap = make(map[string]*Block)
 		s.BlockList = []*Block{block}
 	} else {
 		s.BlockList = append(s.BlockList, block)
 	}
 	s.blockAddrMap[block.Addr] = block
 
-	err := s.fi.NewBlock(block)
-	if err != nil {
-		s.Error("%s", err)
+	if s.fi.GetNodeType() == flanetinterface.FormulatorNode {
+		// err := s.fi.NewBlock(block)
+		// if err != nil {
+		// 	// s.Error("%s", err)
+		// }
 	}
 
 }
@@ -274,11 +299,12 @@ func (s *Sync) CheckBlock() {
 
 //FlanetImpl TODO
 type FlanetImpl interface {
-	PeerSend(string, util.FletaPacket) error
 	GetObserverNodeAddr() string
-	PeerList() ([]flanetinterface.Node, error)
-	NewBlock(*Block) error
+	// NewBlock(*Block) error
 	SeedNodeAddr() (string, error)
+	GetNodeType() string
+	SetBlockTime(string, time.Time) error
+	Localhost() string
 }
 
 //GetMakeBlockTime is returns the time of the requested block
@@ -292,7 +318,7 @@ func (s *Sync) GetMakeBlockTime(addr string) (time.Time, error) {
 //SeedNodeAddr TODO
 func (s *Sync) SeedNodeAddr() (string, error) {
 	seedNodeAddr := util.Sha256HexInt(simulationdata.FormulatorNodeStartIndex)
-	if s.Localhost() == seedNodeAddr {
+	if s.fi.Localhost() == seedNodeAddr {
 		return "", ErrNotFoundSeedNode
 	}
 	return seedNodeAddr, nil

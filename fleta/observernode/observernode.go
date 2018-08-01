@@ -2,12 +2,8 @@ package observernode
 
 import (
 	"errors"
-	"fleta/minninggroup"
-	"fleta/mock/mockblock"
 	"fleta/mock/mocknet"
 	"net"
-	"strconv"
-	"time"
 
 	util "fleta/samutil"
 	"fleta/samutil/concentrator"
@@ -41,6 +37,15 @@ func (o *ObserverNode) VisualizationData() []string {
 	return list
 }
 
+//RegisteredRouter TODO
+func (o *ObserverNode) RegisteredRouter() error {
+	return nil
+}
+
+//Close TODO
+func (o *ObserverNode) Close() {
+}
+
 //TODO define observernode address
 func New(fi FlanetImpl) *ObserverNode {
 	o := &ObserverNode{
@@ -48,21 +53,6 @@ func New(fi FlanetImpl) *ObserverNode {
 	}
 	o.fi = fi
 	o.Caster.Init(o)
-
-	o.AddCommand("OBSERVER", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
-		index, err := strconv.Atoi(fp.Content)
-		if err != nil {
-			o.Error("%s", err)
-			return false, err
-		}
-		if index == 1 || index == 3 {
-			o.observerList[index] = conn
-			return true, nil
-		}
-		return false, ErrInvalidIndex
-	})
-
-	o.addCommand()
 
 	return o
 }
@@ -100,42 +90,16 @@ func (o *ObserverNode) ConnectObserver(nodeIndex int) {
 }
 
 //MakeGenesisBlock TODO
-func (o *ObserverNode) MakeGenesisBlock() mockblock.Block {
-	block := mockblock.Block{
-		MakeBlockTime: time.Now(),
-		Addr:          o.Localhost(),
-		Height:        0,
-	}
-	return block
-}
-
-func (o *ObserverNode) addCommand() {
-	o.AddCommand("OBNDSCOR", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
-		var review minninggroup.Review
-		util.FromJSON(review, fp.Content)
-
-		o.Log("%s", review)
-
-		return true, nil
-	})
-	o.AddCommand("OBRQGEBL", func(conn net.Conn, fp util.FletaPacket) (exit bool, err error) {
-		b := o.MakeGenesisBlock()
-
-		fletaPacket := util.FletaPacket{
-			Command: "SYRSGEBL",
-			Content: util.ToJSON(b),
-		}
-
-		p, err := fletaPacket.Packet()
-		if err != nil {
-			return false, err
-		}
-		conn.Write(p)
-
-		return true, nil
-	})
-}
+// func (o *ObserverNode) MakeGenesisBlock() *mockblock.Block {
+// 	block := &mockblock.Block{
+// 		MakeBlockTime: time.Now(),
+// 		Addr:          o.Localhost(),
+// 		Height:        0,
+// 	}
+// 	return block
+// }
 
 //FlanetImpl TODO
 type FlanetImpl interface {
+	concentrator.IRouter
 }
