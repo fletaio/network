@@ -14,7 +14,7 @@ import (
 	"fleta/flanetinterface"
 	"fleta/formulator"
 	"fleta/message"
-	"fleta/minninggroup"
+	"fleta/mininggroup"
 	"fleta/mock"
 	"fleta/mock/mockblock"
 	"fleta/mock/mocknet"
@@ -35,7 +35,7 @@ type Flanet struct {
 
 	hardstate hardstate.IHardState
 
-	mg   *minninggroup.MinningGroup
+	mg   *mininggroup.MiningGroup
 	sync *mockblock.Sync
 	pm   *peer.PeerManager
 
@@ -58,8 +58,8 @@ func NewFlanet(i int, nodeType string) (*Flanet, error) {
 	return f, nil
 }
 
-func (f *Flanet) Minninggroup(minninggroup *minninggroup.MinningGroup) {
-	f.mg = minninggroup
+func (f *Flanet) Mininggroup(mininggroup *mininggroup.MiningGroup) {
+	f.mg = mininggroup
 }
 func (f *Flanet) Sync(sync *mockblock.Sync) {
 	f.sync = sync
@@ -198,7 +198,7 @@ func (f *Flanet) OpenFlanet() error {
 	if err != nil {
 		return err
 	}
-	// f.Log("listen addr : %s", listen.Addr().String())
+
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
@@ -266,7 +266,6 @@ func (f *Flanet) AskFormulator(addr string) (isLocalhost bool) {
 	payload := message.ToPayload(flanetwork.AskFormulatorMessageType, askf)
 
 	f.DialTo(addr)
-	// f.Log("AskFormulator to %s", addr)
 	f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
 	return false
 }

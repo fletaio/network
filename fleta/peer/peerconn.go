@@ -2,11 +2,11 @@ package peer
 
 import (
 	"io"
-	"log"
 	"net"
 	"sync"
 
 	"fleta/message"
+	"fleta/mock/simulationlog"
 	"fleta/network"
 	"fleta/packet"
 )
@@ -16,7 +16,6 @@ type PeerConn struct {
 	MessageResolver message.Resolver
 	errc            chan error
 	mSend           sync.Mutex
-	mRecv           sync.Mutex
 }
 
 func NewPeerConn(conn net.Conn, resolver message.Resolver, errc chan error) *PeerConn {
@@ -29,6 +28,7 @@ func NewPeerConn(conn net.Conn, resolver message.Resolver, errc chan error) *Pee
 
 func (p *PeerConn) Send(payload *packet.Payload, compression packet.CompressionType) error {
 	p.mSend.Lock()
+	simulationlog.Send(p.conn.LocalAddr().String(), p.conn.RemoteAddr().String(), *payload)
 	_, err := Send(p.conn, *payload, compression)
 	p.mSend.Unlock()
 	return err
@@ -58,20 +58,8 @@ func (p *PeerConn) recvLoop() {
 	var err error
 
 	for {
-		var n int64
-		// p.mRecv.Lock()
-		n, err = Recv(p.conn, p.MessageResolver)
-		// p.mRecv.Unlock()
+		_, err = Recv(p.conn, p.MessageResolver)
 		if err != nil {
-			// if nErr, ok := err.(net.Error); ok {
-			// 	if nErr.Timeout() {
-			// 		continue
-			// 	}
-			// }
-			// if err != io.EOF {
-			// 	panic(err)
-			// }
-			log.Println("Message Received!", n, err)
 			break
 		}
 	}

@@ -7,6 +7,7 @@ import (
 
 func main() {
 	var fleta fleta.Fleta
+
 	mocknetwork.Fleta(&fleta)
 	mocknetwork.Run()
 

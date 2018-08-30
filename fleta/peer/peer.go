@@ -39,7 +39,6 @@ func (p *Peer) CheckConn() bool {
 }
 
 func (p *Peer) Bond(conn net.Conn) chan error {
-	// log.Println("Peer Bonded: ", p.ID)
 	p.conn = NewPeerConn(conn, p.MessageResolver, p.Errc)
 	p.conn.Run()
 	return p.Errc

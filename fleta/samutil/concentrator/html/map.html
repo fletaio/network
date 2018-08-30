@@ -1,124 +1,606 @@
-<div id="main" pageId="mapPage"><!-- Main -->
-						<!-- One -->
-	<section>
-		<a href="javascript:" onclick="page.closePage('{{pageId}}')" class="xbutton closePage" ></a>
-		<div id="mapPageRepresentCase"></div>
-	</section>
+<div>
+	<input type="button" value="start" onclick="start()" />
+	<input type="button" value="<" onclick="backward()" />
+	<input type="button" value="||" onclick="pause()" />
+	<input type="button" value=">" onclick="forward()" />
+	<input id="speed" name="speed" value=1 />
+	<input type="button" value="addNode" onclick="addNode(node.length);" />
+	from <input id="from" name="from" value=1 />
+	to <input id="to" name="to" value=1 />
+	<input type="button" value="addpath" onclick="addPath(from.value, to.value)" />
+	<br/>
+	<input type="button" value="stop" onclick="lock()" />
+	<input type="button" value="play" onclick="unlock()" />
+
+</div>
+<div id="time"></div>
+<div id="info">
+
+</div>
+<div id="chart">
+
 </div>
 
+<style id="svgCss"></style>
+
 <style>
+	.nodes circle {fill:orange;stroke:orange;fill-opacity:0.5;}
+	.axis {
+	  stroke: #000;
+	  stroke-width: 1.5px;
+	}
 
-.link {
-  fill: none;
-  stroke: #666;
-  stroke-width: 1.5px;
-}
+	.link {
+	  fill: none;
+	  stroke-width: 2px;
+	  stroke-opacity: .3;
+	}
 
-.node circle {
-  fill: #ccc;
-  stroke: #fff;
-  stroke-width: 1.5px;
-}
+	.node circle.active {
+	  stroke: red;
+	  stroke-width: 3px;
+	}
 
-text {
-  font: 10px sans-serif;
-  pointer-events: none;
-}
+	</style>
+<script src="./js/d3.v3.min.js" charset="utf-8"></script>
+<script src="./js/d3.hive.min.js" charset="utf-8"></script>
+<script src="./js/jquery/jquery-2.1.1.min.js" charset="utf-8"></script>
 
-</style>
+<!-- <title>jQuery UI Slider - Default functionality</title> -->
+<link rel="stylesheet" href="./js/jquery/jquery-ui.css">
+<!-- <link rel="stylesheet" href="/resources/demos/style.css"> -->
+<!-- <script src="https://code.jquery.com/jquery-1.12.4.js"></script> -->
+<script src="./js/jquery/jquery-ui.js"></script>
+
 <script>
 
-function delaySpreadMap () {
-	if (typeof d3 === "undefined") {
-		setTimeout(function () {
-			delaySpreadMap();
-		}, 100);
-	} else {
-		spreadMap();
+var now = new Date().getTime()
+
+var timeRoller = 1
+function forward () {
+	timeRoller = 1;
+}
+function backward () {
+	timeRoller = -1;
+}
+function pause () {
+	timeRoller = 0;
+}
+
+async function timer() {
+	var $time = $("#time")
+	var tic = 100
+	var count = 0
+	var time = 0
+
+	var currentIndex = 0
+
+	while (true) {
+		if (timeRoller == 0) {
+			await sleep(500);
+		} else {
+			await sleep(10*speed.value);
+		}
+		count+=(timeRoller);
+		if (tic < count || count < 0)  {
+			if (timeRoller == 1) {
+				count = 0
+			} else {
+				count = tic
+			}
+			time+=timeRoller;
+			$time.html(new Date( ((time*tic) + count) * 10 ))
+		}
+		if (time < 0) {
+			time = 0
+			count = 0
+			currentIndex = 0
+			continue
+		}
+
+		var currentTime = ((time*tic) + count) * 10;
+
+		if (timeRoller == -1) {
+			if (currentIndex >= timerSliderKeys.length) {
+				currentIndex = timerSliderKeys.length-2
+			}
+
+			while (timerSliderKeys[currentIndex+1] > currentTime) {
+				var state = timerSlider[timerSliderKeys[currentIndex-1]]
+				currentIndex--
+				runPlayer(state)
+			}
+		} else {
+			while (timerSliderKeys[currentIndex] < currentTime) {
+				var state = timerSlider[timerSliderKeys[currentIndex]]
+				currentIndex++
+				runPlayer(state)
+			}
+		}
+
+		// if (currentIndex >= timerSliderKeys.length) {
+		// 	currentIndex = timerSliderKeys.length-1
+		// }
+		// if (currentIndex < 0) {
+		// 	currentIndex = 0
+		// }
+
 	}
 }
 
-function spreadMap () {
-	// http://blog.thomsonreuters.com/index.php/mobile-patent-suits-graphic-of-the-day/
-	var links = {linkData}
-	var nodes = {};
-	
-	// Compute the distinct nodes from the links.
-	links.forEach(function(link) {
-	  link.source = nodes[link.source] || (nodes[link.source] = {name: link.source});
-	  link.target = nodes[link.target] || (nodes[link.target] = {name: link.target});
-	});
-	
-	var width = $("#wrapper").width(),
-	    height = 900;
-	
-	var force = d3.layout.force()
-	    .nodes(d3.values(nodes))
-	    .links(links)
-	    .size([width, height])
-	    .linkDistance(Math.min(width/10, 100))
-	    .charge(-400)
-	    .on("tick", tick)
-	    .start();
-	
-	var svg = d3.select("#mapPageRepresentCase").append("svg")
-	    .attr("width", width)
-	    .attr("height", height);
-	
-	var link = svg.selectAll(".link")
-	    .data(force.links())
-	  .enter().append("line")
-	    .attr("class", "link");
-	
-	var node = svg.selectAll(".node")
-	    .data(force.nodes())
-	  .enter().append("g")
-	    .attr("class", "node")
-	    .on("mouseover", mouseover)
-	    .on("mouseout", mouseout)
-	    .on("dblclick", openPage)
-	    .call(force.drag);
-	
-	node.append("circle")
-	    .attr("r", 8);
-	
-	node.append("pageId")
-	    .attr("pageId", function(d) { return d.name; });
-	
-	node.append("text")
-	    .attr("x", 12)
-	    .attr("dy", ".35em")
-	    .text(function(d) { return d.name; });
-	
-	function tick() {
-	  link
-	      .attr("x1", function(d) { return d.source.x; })
-	      .attr("y1", function(d) { return d.source.y; })
-	      .attr("x2", function(d) { return d.target.x; })
-	      .attr("y2", function(d) { return d.target.y; });
-	
-	  node
-	      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+function runPlayer(stateArr) {
+	// var nodes = state.node.keys()
+	for (i in stateArr) {
+		var state = stateArr[i]
+		for (key in state.node) {
+			addNode(key)
+		}
+
+		cPanel.selectAll("circle")
+		.each(function () {
+			var nodeID = this.getAttribute("nodeID")
+			if (state.node[nodeID] !== true) {
+				cPanel.selectAll("circle[nodeID='"+nodeID+"']").remove()
+			}
+		});
+
+		for (key in state.path) {
+			var ft = key.split(":")
+			addPath(ft[0], ft[1])
+		}
+
+		lPanel.selectAll("path")
+		.each(function () {
+			var from = this.getAttribute("from")
+			var to = this.getAttribute("to")
+			if (state.path[from+":"+to] !== true && state.path[to+":"+from] !== true) {
+				lPanel.selectAll("path[from='"+from+"'][to='"+to+"']").remove()
+				lPanel.selectAll("path[from='"+to+"'][to='"+from+"']").remove()
+			}
+		})
+
+		for (from in state.blinkPath) {
+			blinkPath(from, state.blinkPath[from].to, state.blinkPath[from].type)
+		}
 	}
-	
-	function openPage() {
-		location.href="#"+d3.select(this).select("text").text()+".page";
-	}
-	
-	function mouseover() {
-	  d3.select(this).select("circle").transition()
-	      .duration(750)
-	      .attr("r", 16);
-	}
-	
-	function mouseout() {
-	  d3.select(this).select("circle").transition()
-	      .duration(750)
-	      .attr("r", 8);
-	}
-	
+
+	updatePosition()
 }
 
-delaySpreadMap ();
+var width = 600,
+    height = 600,
+    innerRadius = 100,
+    outerRadius = 300,
+	roundUnit;
+    // majorAngle = 2 * Math.PI / 3;
+
+var angleUnit;
+var angleArr;
+var angle;
+
+function updateRoundUnit(unit) {
+	// unit = parseInt((unit+1)/(2))
+	roundUnit = unit
+	angleUnit = 2 * Math.PI / roundUnit;
+	angleArr = []
+
+	for (var i = 0 ; i < roundUnit ; i++ ) {
+		angleArr.push(angleUnit*i)
+	}
+	angle = d3.scale.ordinal().range(angleArr);
+}
+updateRoundUnit(1)
+
+var radius = d3.scale.linear()
+    .range([innerRadius, outerRadius]);
+
+var color = d3.scale.category10();
+
+var svg = d3.select("#chart").append("svg")
+    .attr("width", width)
+    .attr("height", height)
+	.append("g")
+	.attr("transform", "translate(" + width/2 + "," + height/2 + ")")
+
+//   Draw the axes.
+//   svg.selectAll(".axis")
+//       .data(angleArr)
+//     .enter().append("line")
+//       .attr("class", "axis")
+//       .attr("transform", function(d, i) { return "rotate(" + degrees(angle(i)) + ")"; })
+//       .attr("x1", radius(0))
+//       .attr("x2", function(d) { return radius(1); });
+
+
+var node = []
+var links = []
+var linkMap = {}
+var dataMap = {}
+
+var lPanel = svg.append("g")
+		.attr("class", "links")
+var mPanel = svg.append("g")
+		.attr("class", "move")
+var cPanel = svg.append("g")
+		.attr("class", "nodes")
+
+var timerSlider = {}
+var timerSliderKeys = []
+
+function start() {
+	console.log("start")
+	d3.csv("./data/info9.log", async function(nodes) {
+		var nodeLength = nodes.length
+
+		timerSlider = {}
+		timerSliderKeys = []
+
+		var currentState = {
+			node : {},
+			path : {},
+			deletePath : {},
+			blinkPath : {},
+			d : {},
+		}
+		var beforeTime = -2
+		var deleteBlinkPath = false;
+		for (var i = 0 ; i < nodeLength ; i++) {
+			var d = nodes[i]
+			var ctime = timeParse(d.t)-0
+
+			currentState.d = d
+
+			var volatileBlinkPath = {}
+			switch (d.c) {
+				case "I":
+					break;
+				case "L":
+					currentState.node[d.d] = true
+					break;
+				case "D":
+					var ft = d.d.split(/[>:]/gi)
+
+					currentState.node[ft[1]] = true
+					currentState.node[ft[0]] = true
+
+					currentState.path[ft[0]+":"+ft[1]] = true
+					break;
+				case "C":
+					var ft = d.d.split(">")
+					delete currentState.path[ft[0]+":"+ft[1]]
+					delete currentState.path[ft[1]+":"+ft[0]]
+
+					break;
+				case "S":
+					var ft = d.d.split(/[>:]/)
+					// currentState.blinkPath
+					volatileBlinkPath[ft[0]] = {
+						to : ft[1],
+						type : ft[2],
+					}
+					break;
+
+				default:
+					break;
+			}
+
+			currentState.blinkPath = volatileBlinkPath
+
+			if (typeof timerSlider[ctime] === "undefined") {
+				timerSlider[ctime] = []
+				timerSliderKeys.push(ctime)
+			}
+			timerSlider[ctime].push(JSON.parse(JSON.stringify(currentState)))
+		}
+
+		timer()
+
+	})
+
+
+}
+
+function nodeHeight(i) {
+	if (i == roundUnit-1) {
+		return 1/2
+	}
+	return (i%2)/2
+	return parseInt(i / (roundUnit/2)) / (node.length/roundUnit)
+}
+
+function addPath(from, to) {
+	if (lPanel.selectAll(".path"+from+"to"+to+"e,.path"+to+"to"+from+"e")[0].length > 0) {
+		return
+	}
+
+	var path = lPanel.append("path").attr("class", function (d) {
+		return "link "+"path"+from+"to"+to+"e";
+	})
+	.attr("from", from)
+	.attr("to", to)
+	.attr("stroke", "#ccc")
+	.on("mouseover", linkMouseover)
+	.on("mouseout", mouseout)
+
+	links.push({from:from, to:to})
+
+	drawPath(from, to)
+	blinkPath(from, to, "dial", path)
+	// setTimeout(function () {
+	// }, 0)
+
+//	M100,0C86.60254037844388,49.99999999999999 49.999999999999986,86.60254037844388 6.123233995736766e-15,100
+}
+function updatePosition() {
+	var circle = cPanel.selectAll("circle")
+		circle.transition()
+			.duration(100*speed.value)
+			.ease("easeLinear")
+			.attr("r",function(d,i){return 5})
+			.attr("transform", function() {
+				var f = this.getAttribute("nodeID")
+				return "rotate(" + degrees(angleArr[f]) + ")";
+			})
+			.attr("cx",function(d,i){
+				var f = this.getAttribute("nodeID")
+				return radius(nodeHeight(f));
+			})
+	for (i in links) {
+		drawPath(links[i].from, links[i].to)
+	}
+}
+
+function getPosition(i) {
+	var a = angleArr[i]-(Math.PI/2)
+	var r = radius(nodeHeight(i))
+	return {
+		x : Math.cos(a)*r,
+		y : Math.sin(a)*r
+	}
+}
+
+function drawPath(from, to, endcallback) {
+	var p1 = getPosition(from)
+	var p2 = getPosition(to)
+
+	var pathD = "M"+p1.x+","+p1.y+"L"+p2.x+","+p2.y
+
+	path = lPanel.selectAll(".path"+from+"to"+to+"e,.path"+to+"to"+from+"e")
+	path
+	.attr("from", from)
+	.attr("to", to)
+	.attr("d", function () {
+		var p = this.getAttribute("path")
+		if (p) {
+			return p;
+		} else {
+			return "M"+p1.x+","+p1.y
+		}
+	})
+
+	path
+		.transition()
+		.duration(100*speed.value)
+		.ease("easeLinear")
+		.attr("stroke", "#ccc")
+		.attr("path", pathD)
+		.attr("d", pathD)
+        .each("end", function () {
+			if (typeof endcallback === "function") {
+				endcallback()
+			}
+		});// infinite loop
+}
+
+function removePath(from, to) {
+	var index = links.indexOf({from:from, to:to})
+	if (index >= 0) {
+		links.splice(index, 1)
+	}
+	var index = links.indexOf({from:to, to:from})
+	if (index >= 0) {
+		links.splice(index, 1)
+	}
+	var selector = ".path"+from+"to"+to+"e,.path"+to+"to"+from+"e"
+	lPanel.selectAll(selector).remove()
+}
+
+function removeNode(from) {
+	updateRoundUnit(cPanel.selectAll("circle")[0].length)
+	cPanel.selectAll("circle[nodeID='"+from+"']")
+}
+
+function addNode(from, to) {
+	updateRoundUnit(cPanel.selectAll("circle")[0].length)
+
+	if (cPanel.selectAll("circle[nodeID='"+from+"']")[0].length > 0) {
+		return
+	}
+
+	var c = cPanel.append("circle")
+
+		c.attr("nodeID", from)
+			.attr("r",0)
+			.attr("cy",0)
+			.attr("cx",radius(nodeHeight(from)))
+			.attr("transform", function() {
+				return "rotate(" + degrees(angleArr[from]) + ")"; }
+			)
+			.on("mouseover", nodeMouseover)
+			.on("mouseout", mouseout)
+			.on("mousedown", nodeDown)
+			.on("mouseup", nodeUp)
+
+}
+
+function blinkPath(name1, name2, type, path) {
+	if (typeof path === "undefined") {
+		var path1 = lPanel.selectAll(".path"+name1+"to"+name2+"e")
+		var path2 = lPanel.selectAll(".path"+name2+"to"+name1+"e")
+		var direction = true;
+		if (path1[0].length > 0) {
+			var path = path1
+			direction = false
+		} else {
+			var path = path2
+		}
+	}
+
+	if (path[0].length == 0) {
+		return
+	}
+
+	startPoint = pathStartPoint(path);
+
+	var marker = mPanel.append("circle")
+	marker.attr("r", 7)
+		.attr("r",3)
+		.attr("from",name1)
+		.attr("to",name2)
+		.attr("fill", color(type))
+		.attr("stroke", color(type))
+		.attr("fill-opacity", 0.5)
+		.attr("transform", "translate(" + startPoint + ")");
+
+    marker.transition()
+        .duration(100*speed.value)
+        .attrTween("transform", translateAlong(path.node(), direction))
+        .each("end", function () {marker.remove()});// infinite loop
+}
+
+function pathStartPoint(path) {
+	var d = path.attr("d");
+	var dsplitted = d.split(/[ ML]/);
+	return dsplitted[1].split(",");
+}
+
+function translateAlong(path, direction, passLength) {
+	var l = path.getTotalLength();
+	l = l
+	return function(i) {
+		return function(t) {
+			if ( (direction && timeRoller == 1) || (!direction && timeRoller != 1) ) {
+				var v = ((1-t) * l)
+			} else {
+				var v = (t * l)
+			}
+			var p = path.getPointAtLength(v);
+			return "translate(" + p.x + "," + p.y + ")";//Move marker
+		}
+	}
+}
+
+var lockvalue = false
+function lock () {
+
+	mPanel.select("circle").interrupt().transition()
+		.duration(0)
+        .attrTween("transform", function () {
+			//;d3.select(this).attr("transform")
+			return function (i) {
+				return function (t) {
+					return "";
+				}
+			}
+		})
+
+
+	lockvalue = true
+}
+function unlock () {
+
+        // d3.select(this).transition("fadeOut")
+        //     .duration(5000)
+        //     .attr("fill", "rgb(0, 0, " + (d * 10) + ")");
+
+	lockvalue = false
+}
+
+var clickFlag = ""
+function nodeDown(d) {
+	clickFlag = this.getAttribute("nodeID");
+}
+function nodeUp(d) {
+	if (clickFlag !== "") {
+		var t = this.getAttribute("nodeID");
+		addPath(clickFlag, t)
+		clickFlag = ""
+	}
+}
+
+// Highlight the link and connected nodes on mouseover.
+function linkMouseover() {
+	// lock()
+	
+	var from = this.getAttribute("from")
+	var to = this.getAttribute("to")
+	var h=[],i=0
+	h[i++] = "circle[from=\""+from+"\"][to=\""+to+"\"] {r : 10} "
+	h[i++] = "circle[from=\""+to+"\"][to=\""+from+"\"] {r : 10} "
+	h[i++] = "path[from=\""+from+"\"][to=\""+to+"\"] {stroke: red; stroke-width: 2px; stroke-opacity: 1;}"
+	h[i++] = "path[from=\""+to+"\"][to=\""+from+"\"] {stroke: red; stroke-width: 2px; stroke-opacity: 1;}"
+
+	$("#svgCss").html(h.join(""))
+}
+
+// Highlight the node and connected links on mouseover.
+function nodeMouseover() {
+	// lock()
+
+	var from = this.getAttribute("nodeID")
+
+	var h=[],i=0
+	h[i++] = "circle[from=\""+from+"\"] {r : 10} circle[to=\""+from+"\"] {r : 10} "
+	h[i++] = "path[from=\""+from+"\"] {stroke: red; stroke-width: 2px; stroke-opacity: 1;} path[to=\""+from+"\"] {stroke: red; stroke-width: 2px; stroke-opacity: 1;}"
+
+	$("#svgCss").html(h.join(""))
+}
+
+// Clear any highlighted nodes or links.
+function mouseout() {
+	// unlock()
+	$("#svgCss").html("")
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+function degrees(radians) {
+  return radians / Math.PI * 180 - 90;
+}
+
+function timeParse(str) {
+	var unit = 1
+	if (str.endsWith("ms")) {
+		var strs = str.split("ms")
+		strs.length-1
+		str = strs.splice(0, strs.length-1).join("ms")
+	} else if (str.endsWith("s")) {
+		var strs = str.split("s")
+		strs.length-1
+		str = strs.splice(0, strs.length-1).join("s")
+		unit = 1000
+	}
+
+	if (str.indexOf("h") > 0 || str.indexOf("m") > 0) {
+		var h = 0
+		if (str.indexOf("h") > 0) {
+			var strs = str.split("h")
+			h = strs[0]
+			str = strs[1]
+		}
+		var m = 0 
+		if (str.indexOf("m") > 0) {
+			var strs = str.split("m")
+			m = strs[0]
+			str = strs[1]
+		}
+
+		str = (h*60*60) + (m*60) + (str-0)
+	}
+
+	return str * unit
+}
 
 </script>
+

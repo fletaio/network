@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
-	"log"
 
 	"fleta/encoding"
 )
@@ -80,7 +79,6 @@ func (packet *Packet) ReadFrom(r io.Reader) (int64, error) {
 
 	packet.Header = Header{}
 	if n, err := packet.Header.ReadFrom(r); err != nil {
-		log.Println("NOT READ ALL 4")
 		return read, err
 	} else {
 		read += n
@@ -89,16 +87,13 @@ func (packet *Packet) ReadFrom(r io.Reader) (int64, error) {
 	integrity := new(encoding.CRC32)
 	e, err := encoding.NewReader(r, integrity)
 	if err != nil {
-		log.Println("NOT READ ALL 3")
 		return read, err
 	}
 
 	bs := make([]byte, packet.Header.Size)
 	if n, err := e.Read(bs); n != packet.Header.Size {
-		log.Println("NOT READ ALL 1")
 		return read, ErrMismatchPacketSize
 	} else if err != nil {
-		log.Println("NOT READ ALL 2")
 		return read, err
 	} else {
 		read += int64(n)

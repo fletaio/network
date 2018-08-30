@@ -24,7 +24,7 @@ var (
 
 func init() {
 	// set location of log file
-	var logpath = build.Default.GOPATH + "/src/info.log"
+	var logpath = build.Default.GOPATH + "/src/log.log"
 
 	flag.Parse()
 	var file, err1 = os.Create(logpath)
@@ -43,20 +43,6 @@ func init() {
 	srcPath = strings.Replace(dir, "\\", "/", 10)
 }
 
-func write(msg string) {
-	if logfile == nil {
-		f, err := os.OpenFile("log.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			panic(err)
-		}
-		logfile = f
-	}
-
-	if _, err := logfile.WriteString(msg); err != nil {
-		panic(err)
-	}
-}
-
 //Log It's log
 func (f *Flanet) Log(format string, msg ...interface{}) {
 	msg = append([]interface{}{f.getFlanetID(), util.Sha256HexInt(f.getFlanetID())}, msg...)
@@ -69,7 +55,6 @@ func (f *Flanet) Log(format string, msg ...interface{}) {
 	msg = append([]interface{}{path}, msg...)
 
 	format = string(append([]byte("%s : %d, %s "), []byte(format)...))
-	// write(fmt.Sprintf(format, msg...))
 	// Log.Printf(format, msg...)
 	log.Printf(format, msg...)
 }
@@ -84,7 +69,6 @@ func (f *Flanet) Error(format string, msg ...interface{}) {
 	msg = append(msg, []interface{}{strs[0]}...)
 
 	format = fmt.Sprintf("%s %s\n%s", "Error %d, %s ", format, "%s")
-	// write(fmt.Sprintf(format, msg...))
 	// Log.Printf(format, msg...)
 	log.Printf(format, msg...)
 

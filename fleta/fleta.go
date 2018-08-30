@@ -64,7 +64,6 @@ func (f *Fleta) Start(i int, nodeType string) error {
 	} else {
 		// pl := peerlist.New(fn)
 		// fn.RegistCaster(pl)
-
 	}
 	sync := mockblock.New(fn)
 	fn.Sync(sync)

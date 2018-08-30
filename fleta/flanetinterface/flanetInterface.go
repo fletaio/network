@@ -11,8 +11,8 @@ const (
 
 //port info
 const (
-	PeerPort         = 3000
-	MinningGroupPort = 3001
+	PeerPort        = 3000
+	MiningGroupPort = 3001
 )
 
 //Node is sample node struct

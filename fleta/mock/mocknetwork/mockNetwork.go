@@ -3,8 +3,8 @@ package mocknetwork
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"regexp"
@@ -18,6 +18,8 @@ import (
 	"fleta/mock"
 	util "fleta/samutil"
 	"fleta/samutil/concentrator"
+
+	"git.fleta.io/common/log"
 )
 
 //IFleta Fleta interface
@@ -88,6 +90,37 @@ func StoreNodeMap(key string, n NodeInfo) {
 func Run() {
 	os.RemoveAll("./hardstate")
 
+	{
+		// Trace
+		defer log.WithTrace().Info("time to run")
+
+		log.Debug("debug")
+		log.Info("info")
+		log.Notice("notice")
+		log.Warn("warn")
+		// log.Panic("panic") // this will panic
+		log.Alert("alert")
+		// log.Fatal("fatal") // this will call os.Exit(1)
+
+		err := errors.New("the is an error")
+		// logging with fields can be used with any of the above
+
+		// predefined global fields
+		log.WithError(err).Error("error")
+		log.WithError(err).WithFields(log.F("key", "value")).Info("test info")
+		log.Debug("error")
+
+		log.WithField("key", "value").Info("testing default fields")
+
+		// or request scoped default fields
+		logger := log.WithFields(
+			log.F("request", "req"),
+			log.F("scoped", "sco"),
+		)
+
+		logger.WithField("key", "value").Info("test")
+
+	}
 	// mockCount := simulationdata.ObserverNodeCount + simulationdata.FormulatorNodeCount + simulationdata.NormalNodeCount
 	mockCount := simulationdata.InitNodeCount
 
@@ -118,6 +151,7 @@ func AddFleta(nodeType string) {
 		go mockDataSend(i)
 	}(totalCount, nodeType)
 	totalCount++
+	time.Sleep(time.Millisecond * 100)
 	addLock.Unlock()
 }
 
@@ -127,7 +161,8 @@ func NodeAdder(sender <-chan concentrator.Msg) {
 		msg := <-sender
 		switch msg.Command {
 		case "empty":
-			log.Println(msg.Num)
+			log.Debug(msg.Num)
+			// log.Println(msg.Num)
 		case "addFormulator":
 			for i := 0; i < msg.Num; i++ {
 				AddFleta(flanetinterface.FormulatorNode)
@@ -236,8 +271,10 @@ func RegistAccept(addr string) (node NodeInfo) {
 //Ping is ping to input address
 func Ping(address string) {
 	my := GetMainID()
-	log.Println(my)
-	log.Println(address)
+	log.Debug(my)
+	log.Debug(address)
+	// log.Println(my)
+	// log.Println(address)
 
 	myDecoded, err := hex.DecodeString(my)
 	if err != nil {

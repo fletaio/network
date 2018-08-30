@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fleta/mock"
 	"fleta/mock/mocknetwork"
+	"fleta/mock/simulationlog"
+	"log"
 	"net"
 	"regexp"
 	"runtime"
@@ -67,7 +69,6 @@ func mockDelay(address string, target string) time.Duration {
 		delay += time.Duration(a + b)
 	}
 
-	// log.Println("delay : %s", time.Millisecond*delay)
 	return time.Millisecond * delay
 }
 
@@ -86,42 +87,44 @@ func (c *mockConn) Log(format string, msg ...interface{}) {
 	msg = append([]interface{}{time, str, c.LocalAddr(), c.RemoteAddr()}, msg...)
 
 	format = string(append([]byte("mocknet %30s %s %s->%s "), append([]byte(format), []byte("\n")...)...))
+
+	log.Printf(format, msg...)
 }
 
 func (c *mockConn) Read(b []byte) (n int, err error) {
 	return c.Conn.Read(b)
-	now := time.Now()
-	if c.readDeadline < 0 {
-		return c.Conn.Read(b)
-	}
-	earliest := now.Add(c.readDeadline)
-	ctx, cancel := context.WithDeadline(context.Background(), earliest)
-	defer cancel()
-
-	type readResult struct {
-		n   int
-		err error
-	}
-
-	rChan := make(chan readResult)
-
-	go func() {
-		r := readResult{}
-		r.n, r.err = c.Conn.Read(b)
-		if r.err != nil {
-			c.Log("test %s", r.err)
+	/*
+		//TODO time out
+		now := time.Now()
+		if c.readDeadline < 0 {
+			return c.Conn.Read(b)
 		}
-		rChan <- r
-	}()
-	select {
-	case <-ctx.Done():
-		err := func() net.Error {
-			return &timeoutError{}
+		earliest := now.Add(c.readDeadline)
+		ctx, cancel := context.WithDeadline(context.Background(), earliest)
+		defer cancel()
+
+		type readResult struct {
+			n   int
+			err error
+		}
+
+		rChan := make(chan readResult)
+
+		go func() {
+			r := readResult{}
+			r.n, r.err = c.Conn.Read(b)
+			rChan <- r
 		}()
-		return 0, err
-	case r := <-rChan:
-		return r.n, r.err
-	}
+		select {
+		case <-ctx.Done():
+			err := func() net.Error {
+				return &timeoutError{}
+			}()
+			return 0, err
+		case r := <-rChan:
+			return r.n, r.err
+		}
+	*/
 }
 
 func (c *mockConn) Write(b []byte) (n int, err error) {
@@ -133,6 +136,7 @@ func (c *mockConn) Write(b []byte) (n int, err error) {
 }
 
 func (c *mockConn) Close() error {
+	simulationlog.Close(c.LocalAddr().String(), c.RemoteAddr().String())
 	c.Conn.Close()
 	return nil
 }
@@ -168,27 +172,23 @@ func minNonzeroTime(a, b time.Time) time.Time {
 
 //DialTimeout is return Conn
 func DialTimeout(networkType, address string, timeout time.Duration, localhost string) (net.Conn, error) {
-	connected := make(chan bool)
-	var conn net.Conn
+	connected := make(chan net.Conn)
 
 	now := time.Now()
 	earliest := now.Add(timeout)
 	ctx, cancel := context.WithDeadline(context.Background(), earliest)
 	defer cancel()
 
+	delay := mockDelay(localhost, address)
 	go func() {
-		delay := mockDelay(localhost, address)
 		time.Sleep(delay)
-		conn = mocknetwork.RegistDial(networkType, address, localhost)
-
-		connected <- true
+		connected <- mocknetwork.RegistDial(networkType, address, localhost)
 	}()
 	select {
 	case <-ctx.Done():
 		return nil, ErrDialTimeout
-	case <-connected:
-		var c net.Conn
-		c = &mockConn{
+	case conn := <-connected:
+		mc := &mockConn{
 			Conn: conn,
 			LocalAddrVal: mockAddr{
 				network: networkType,
@@ -202,7 +202,10 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 			readDeadline:  -1,
 			writeDeadline: -1,
 		}
-		return c, nil
+
+		simulationlog.Dial(mc.LocalAddr().String(), mc.RemoteAddr().String(), delay)
+
+		return mc, nil
 	}
 
 }
@@ -213,10 +216,10 @@ func Dial(networkType, address string, localhost string) (net.Conn, error) {
 
 	delay := mockDelay(localhost, address)
 	time.Sleep(delay)
+
 	conn = mocknetwork.RegistDial(networkType, address, localhost)
 
-	var c net.Conn
-	c = &mockConn{
+	mc := &mockConn{
 		Conn: conn,
 		LocalAddrVal: mockAddr{
 			network: networkType,
@@ -230,7 +233,10 @@ func Dial(networkType, address string, localhost string) (net.Conn, error) {
 		readDeadline:  -1,
 		writeDeadline: -1,
 	}
-	return c, nil
+
+	simulationlog.Dial(mc.LocalAddr().String(), mc.RemoteAddr().String(), delay)
+
+	return mc, nil
 }
 
 type mockListener struct {
@@ -295,7 +301,9 @@ func Listen(networkType, addr string) (net.Listener, error) {
 			address: addr,
 		},
 	}
+
 	ml.waitAccept()
+	simulationlog.Listen(addr)
 
 	l = &ml
 
