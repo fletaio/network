@@ -362,7 +362,7 @@ func TestRouter_Data_PingPong(t *testing.T) {
 			// tt.r2.AddListen(tt.args.addr2)
 
 			wg := sync.WaitGroup{}
-			wg.Add(3)
+			wg.Add(4)
 
 			var resultErr error
 
