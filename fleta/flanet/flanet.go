@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"fleta/flanet/flanetwork"
 	"fleta/flanet/hardstate"
+	"fleta/flanet/network"
 	"fleta/flanetinterface"
 	"fleta/formulator"
 	"fleta/message"
@@ -91,14 +91,14 @@ func (f *Flanet) touchSeedNode() {
 
 //Close Close obj
 func (f *Flanet) flanetConsumer(msg message.Message) {
-	mType, err := flanetwork.TypeOfMessage(msg)
+	mType, err := network.TypeOfMessage(msg)
 	if err != nil {
 		f.Error("err : %s", err)
 		return
 	}
 	switch mType {
-	case flanetwork.FormulatorListMessageType:
-		if fl, ok := msg.(*flanetwork.FormulatorList); ok {
+	case network.FormulatorListMessageType:
+		if fl, ok := msg.(*network.FormulatorList); ok {
 			if len(fl.List) > 1 {
 				f.Debug("%d", len(fl.List))
 			}
@@ -107,13 +107,13 @@ func (f *Flanet) flanetConsumer(msg message.Message) {
 			}
 
 		}
-	case flanetwork.AskFormulatorMessageType:
+	case network.AskFormulatorMessageType:
 		localPeerAddr := f.Localhost() + ":" + strconv.Itoa(flanetinterface.PeerPort)
-		af := flanetwork.NewAnswerFormulator(localPeerAddr, f.GetNodeType())
+		af := network.NewAnswerFormulator(localPeerAddr, f.GetNodeType())
 
-		payload := message.ToPayload(flanetwork.AnswerFormulatorMessageType, af)
+		payload := message.ToPayload(network.AnswerFormulatorMessageType, af)
 
-		addr := msg.(*flanetwork.AskFormulator).Addr
+		addr := msg.(*network.AskFormulator).Addr
 		f.DialTo(addr)
 		err := f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
 		if err != nil {
@@ -124,9 +124,9 @@ func (f *Flanet) flanetConsumer(msg message.Message) {
 			}
 		}
 
-	case flanetwork.AnswerFormulatorMessageType:
-		addr := msg.(*flanetwork.AnswerFormulator).Addr
-		nodeType := msg.(*flanetwork.AnswerFormulator).NodeType
+	case network.AnswerFormulatorMessageType:
+		addr := msg.(*network.AnswerFormulator).Addr
+		nodeType := msg.(*network.AnswerFormulator).NodeType
 		f.hardstate.AnswerFormulator(addr, nodeType)
 		f.pm.SetlimitPeerSize(len(*f.hardstate.FormulatorList()) / 3)
 	}
@@ -243,8 +243,8 @@ func (f *Flanet) SaveNewNode(addr string) ([]byte, error) {
 
 //SpreadNewNodes TODO
 func (f *Flanet) SpreadNewNodes(addr string) ([]string, error) {
-	responseList := flanetwork.NewFormulatorList([]string{addr})
-	payload := message.ToPayload(flanetwork.FormulatorListMessageType, responseList)
+	responseList := network.NewFormulatorList([]string{addr})
+	payload := message.ToPayload(network.FormulatorListMessageType, responseList)
 
 	nodeIDs := f.pm.Broadcast(&payload)
 
@@ -262,8 +262,8 @@ func (f *Flanet) AskFormulator(addr string) (isLocalhost bool) {
 	if addr == localhost {
 		return true
 	}
-	askf := flanetwork.NewAskFormulator(localhost)
-	payload := message.ToPayload(flanetwork.AskFormulatorMessageType, askf)
+	askf := network.NewAskFormulator(localhost)
+	payload := message.ToPayload(network.AskFormulatorMessageType, askf)
 
 	f.DialTo(addr)
 	f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)
@@ -273,8 +273,8 @@ func (f *Flanet) AskFormulator(addr string) (isLocalhost bool) {
 //SendToNodeList TODO
 func (f *Flanet) SendToNodeList(addr string, list []string) error {
 
-	responseList := flanetwork.NewFormulatorList(list)
-	payload := message.ToPayload(flanetwork.FormulatorListMessageType, responseList)
+	responseList := network.NewFormulatorList(list)
+	payload := message.ToPayload(network.FormulatorListMessageType, responseList)
 
 	f.DialTo(addr)
 	f.pm.Send(peer.NodeID(addr), &payload, packet.UNCOMPRESSED)

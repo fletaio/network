@@ -4,11 +4,11 @@ import (
 	"sync"
 
 	"fleta/discovery"
+	"fleta/flanet/network"
 	"fleta/message"
 	"fleta/peer"
 
 	"fleta/flanet"
-	"fleta/flanet/flanetwork"
 	"fleta/flanetinterface"
 	"fleta/mock/mockblock"
 	"fleta/mock/mocknetwork"
@@ -48,7 +48,7 @@ func (f *Fleta) Start(i int, nodeType string) error {
 	flanetConsumer := make(chan message.Message)
 
 	//handler chaining
-	h1 := flanetwork.NewMessageHandler(nil, flanetConsumer)
+	h1 := network.NewMessageHandler(nil, flanetConsumer)
 	h2 := discovery.NewMessageHandler(h1, consumer)
 	//init with start handler
 	pm := peer.NewManager(h2)

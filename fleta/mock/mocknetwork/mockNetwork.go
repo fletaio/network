@@ -207,10 +207,14 @@ func appendNode(i int) {
 }
 
 func appendNodeAddress(nodeName string, addr string) {
+	var ft IFleta
+	if fletaTest != nil {
+		ft = fletaTest.NewFleta()
+	}
 	nodeInfo := NodeInfo{
 		NodeType: nodeName,
 		Address:  addr,
-		ft:       fletaTest.NewFleta(),
+		ft:       ft,
 	}
 
 	StoreNodeMap(nodeInfo.Address, nodeInfo)

@@ -1,4 +1,4 @@
-package flanetwork
+package network
 
 import (
 	"encoding/json"
