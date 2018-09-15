@@ -4,15 +4,14 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"fleta/mock/mocknet"
 	"fleta/samutil"
 
 	"git.fleta.io/common/log"
+	"git.fleta.io/fleta/common"
 )
-
-//Hash256 is genesis hash type
-type Hash256 [32]byte
 
 //RemoteAddr is remote address type
 type RemoteAddr string
@@ -20,14 +19,19 @@ type RemoteAddr string
 //Router router interface
 type Router interface {
 	AddListen(addr string) error
-	Dial(addrStr string, genesis Hash256) error
-	ReceiverChan(addr string, genesis Hash256) <-chan Receiver
+	Dial(addrStr string, genesis common.Coordinate) (Receiver, error)
+	Accept(addrStr string, genesis common.Coordinate) (Receiver, error)
+	// PhysicalConnection(addr string) bool
+	// LogicalConnection(addr string, genesis Hash256) bool
 }
 
 type router struct {
+	receiverLock    sync.Mutex
+	pConnLock       sync.Mutex
+	acceptLock      sync.Mutex
 	Listeners       map[RemoteAddr]net.Listener
 	pConn           map[RemoteAddr]*physicalConnection
-	ReceiverChanMap map[int]map[Hash256]chan Receiver
+	ReceiverChanMap map[int]map[common.Coordinate]chan Receiver
 	RouterID        string
 }
 
@@ -42,21 +46,11 @@ func new() *router {
 	r := &router{
 		Listeners:       map[RemoteAddr]net.Listener{},
 		pConn:           map[RemoteAddr]*physicalConnection{},
-		ReceiverChanMap: map[int]map[Hash256]chan Receiver{},
+		ReceiverChanMap: map[int]map[common.Coordinate]chan Receiver{},
 		RouterID:        samutil.Sha256HexInt(i),
 	}
 	i++
 	return r
-}
-
-func converterHash256(in []byte) (out Hash256, err error) {
-	if len(in) != 32 {
-		err = ErrMismatchHashSize
-		return
-	}
-
-	copy(out[:], in)
-	return
 }
 
 func (r *router) localAddr(addr string) string {
@@ -68,8 +62,9 @@ func (r *router) localAddr(addr string) string {
 func (r *router) AddListen(addr string) error {
 	_, has := r.Listeners[RemoteAddr(addr)]
 	if !has {
-		l, err := mocknet.Listen("tcp", r.localAddr(addr))
-		log.Debug("Listen " + r.localAddr(addr))
+		l, err := mocknet.Listen("tcp", addr)
+		// l, err := net.Listen("tcp", addr)
+		log.Debug("Listen ", addr, l.Addr().String())
 		if err != nil {
 			return err
 		}
@@ -87,66 +82,148 @@ func (r *router) run(l net.Listener) {
 			log.Error(err)
 			continue
 		}
+		r.pConnLock.Lock()
 		addr := RemoteAddr(conn.RemoteAddr().String())
-		pc := &physicalConnection{
-			Conn:  conn,
-			lConn: map[Hash256]*logicalConnection{},
-			r:     r,
+		_, has := r.pConn[addr]
+		if has {
+			conn.Close()
+		} else {
+			pc := &physicalConnection{
+				addr:  addr,
+				Conn:  conn,
+				lConn: map[common.Coordinate]*logicalConnection{},
+				r:     r,
+			}
+			r.pConn[addr] = pc
+			go pc.run()
 		}
-		r.pConn[addr] = pc
-		go pc.run()
+		r.pConnLock.Unlock()
 	}
 }
 
-func (r *router) Dial(addrStr string, genesis Hash256) error {
+func (r *router) Accept(addrStr string, genesis common.Coordinate) (Receiver, error) {
+	r.acceptLock.Lock()
+	l, has := r.Listeners[RemoteAddr(addrStr)]
+	if !has {
+		r.acceptLock.Unlock()
+		return nil, ErrListenFirst
+	}
+	lAddr := strings.Split(l.Addr().String(), ":")
+	portStr := lAddr[len(lAddr)-1]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		r.acceptLock.Unlock()
+		return nil, err
+	}
+
+	hashMap, has := r.ReceiverChanMap[port]
+	if !has {
+		hashMap = map[common.Coordinate]chan Receiver{}
+		r.ReceiverChanMap[port] = hashMap
+	}
+
+	ch, has := hashMap[genesis]
+	if !has {
+		ch = make(chan Receiver)
+		hashMap[genesis] = ch
+	}
+	r.acceptLock.Unlock()
+
+	return <-ch, nil
+}
+
+func (r *router) AcceptConn(conn Receiver, genesis common.Coordinate) error {
+	r.acceptLock.Lock()
+	l, has := r.Listeners[RemoteAddr(conn.LocalAddr().String())]
+	if !has {
+		r.acceptLock.Unlock()
+		return ErrListenFirst
+	}
+	lAddr := strings.Split(l.Addr().String(), ":")
+	portStr := lAddr[len(lAddr)-1]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		r.acceptLock.Unlock()
+		return err
+	}
+
+	hashMap, has := r.ReceiverChanMap[port]
+	if !has {
+		hashMap = map[common.Coordinate]chan Receiver{}
+		r.ReceiverChanMap[port] = hashMap
+	}
+
+	ch, has := hashMap[genesis]
+	if !has {
+		ch = make(chan Receiver)
+		hashMap[genesis] = ch
+	}
+	r.acceptLock.Unlock()
+
+	ch <- conn
+	delete(hashMap, genesis)
+	return nil
+}
+
+func (r *router) Dial(addrStr string, genesis common.Coordinate) (Receiver, error) {
+	r.pConnLock.Lock()
+	defer r.pConnLock.Unlock()
 	addr := RemoteAddr(addrStr)
 	pConn, has := r.pConn[addr]
 	if !has {
-		conn, err := mocknet.Dial("tcp", addrStr, r.localAddr(addrStr))
-		log.Debug("Dial to " + addrStr + " from " + r.localAddr(addrStr))
+		localhost := r.localAddr(addrStr)
+		log.Debug("Dial ", " ", addrStr, " ", localhost)
+		conn, err := mocknet.Dial("tcp", addrStr, localhost)
+		// conn, err := net.Dial("tcp", addrStr)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pConn = &physicalConnection{
+			addr:  addr,
 			Conn:  conn,
-			lConn: map[Hash256]*logicalConnection{},
+			lConn: map[common.Coordinate]*logicalConnection{},
 			r:     r,
 		}
 		r.pConn[addr] = pConn
 		go pConn.run()
 	}
+	pConn.handshake(genesis)
 
-	pConn.makeLogicalConnenction(genesis)
-	return nil
+	return pConn.makeLogicalConnenction(genesis), nil
+	return nil, nil
 }
 
 func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
-	delete(r.pConn, RemoteAddr(pc.RemoteAddr().String()))
+	r.pConnLock.Lock()
+	delete(r.pConn, pc.addr)
+	r.pConnLock.Unlock()
 	return pc.Close()
 }
 
-func (r *router) receiverChan(addr string, genesis Hash256) chan Receiver {
-	strs := strings.Split(addr, ":")
-	stringPort := strs[len(strs)-1]
-	port, err := strconv.Atoi(stringPort)
-	if err != nil {
-		return nil
-	}
+// func (r *router) receiverChan(addr string, genesis Hash256) chan Receiver {
+// 	strs := strings.Split(addr, ":")
+// 	stringPort := strs[len(strs)-1]
+// 	port, err := strconv.Atoi(stringPort)
+// 	if err != nil {
+// 		return nil
+// 	}
 
-	portLv, has := r.ReceiverChanMap[port]
-	if !has {
-		portLv = make(map[Hash256]chan Receiver)
-		r.ReceiverChanMap[port] = portLv
-	}
+// 	r.receiverLock.Lock()
+// 	portLv, has := r.ReceiverChanMap[port]
+// 	if !has {
+// 		portLv = make(map[Hash256]chan Receiver)
+// 		r.ReceiverChanMap[port] = portLv
+// 	}
 
-	ch, has := portLv[genesis]
-	if !has {
-		ch = make(chan Receiver, 1000)
-		portLv[genesis] = ch
-	}
-	return ch
-}
+// 	ch, has := portLv[genesis]
+// 	if !has {
+// 		ch = make(chan Receiver, 1024)
+// 		portLv[genesis] = ch
+// 	}
+// 	r.receiverLock.Unlock()
+// 	return ch
+// }
 
-func (r *router) ReceiverChan(addr string, genesis Hash256) <-chan Receiver {
-	return r.receiverChan(addr, genesis)
-}
+// func (r *router) ReceiverChan(addr string, genesis Hash256) <-chan Receiver {
+// 	return r.receiverChan(addr, genesis)
+// }

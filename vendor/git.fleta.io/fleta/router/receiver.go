@@ -1,21 +1,42 @@
 package router
 
-import "io"
+import (
+	"bytes"
+	"io"
+	"net"
+
+	"git.fleta.io/fleta/common"
+)
 
 type logicalConnection struct {
-	genesis Hash256
-	*Receiver
+	genesis           common.Coordinate
+	chainSideReceiver Receiver
+	Receiver
 }
 
 //Receiver is data communication unit
-type Receiver struct {
-	recvChan <-chan []byte
-	sendChan chan<- []byte
-	isClosed bool
+type Receiver interface {
+	Recv() ([]byte, error)
+	Write(data []byte) (int, error)
+	Send(data []byte) error
+	Flush() error
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	Close()
+}
+
+//Receiver is data communication unit
+type receiver struct {
+	recvChan   <-chan []byte
+	sendChan   chan<- []byte
+	b          *bytes.Buffer
+	localAddr  net.Addr
+	remoteAddr net.Addr
+	isClosed   bool
 }
 
 //Recv is receive
-func (r *Receiver) Recv() ([]byte, error) {
+func (r *receiver) Recv() ([]byte, error) {
 	data, ok := <-r.recvChan
 	if !ok {
 		r.Close()
@@ -25,7 +46,24 @@ func (r *Receiver) Recv() ([]byte, error) {
 }
 
 //Send is send
-func (r *Receiver) Send(data []byte) (err error) {
+func (r *receiver) Write(data []byte) (int, error) {
+	if r.b == nil {
+		r.b = &bytes.Buffer{}
+	}
+	return r.b.Write(data)
+}
+
+//Send is send
+func (r *receiver) Send(data []byte) (err error) {
+	if r.b == nil {
+		r.b = &bytes.Buffer{}
+	}
+	_, err = r.b.Write(data)
+	return
+}
+
+//Flush is flush
+func (r *receiver) Flush() (err error) {
 	if r.isClosed {
 		return io.EOF
 	}
@@ -36,14 +74,30 @@ func (r *Receiver) Send(data []byte) (err error) {
 			}
 		}
 	}()
+	if r.b == nil {
+		r.sendChan <- []byte{}
+		return
+	}
 
-	r.sendChan <- data
+	b := r.b.Bytes()
+	r.b = &bytes.Buffer{}
+	r.sendChan <- b
 
-	return err
+	return
 }
 
-//Close is data communication channel close
-func (r *Receiver) Close() {
+//LocalAddr is local address infomation
+func (r *receiver) LocalAddr() net.Addr {
+	return r.localAddr
+}
+
+//RemoteAddr is remote address infomation
+func (r *receiver) RemoteAddr() net.Addr {
+	return r.remoteAddr
+}
+
+//Close is close the data communicate channel
+func (r *receiver) Close() {
 	if !r.isClosed {
 		r.isClosed = true
 		close(r.sendChan)

@@ -2,12 +2,16 @@ package router
 
 import (
 	"io"
+	"math/rand"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"git.fleta.io/common/log"
+	"git.fleta.io/fleta/common"
 )
 
 type mockAddr struct {
@@ -33,11 +37,11 @@ func (c *mockConn) SetWriteDeadline(t time.Time) error { log.Debug("SetWriteDead
 
 func TestClientAndRouterCommunicate(t *testing.T) {
 	type args struct {
-		networkType     string
-		localhost       string
-		remotehost      string
-		r               *router
-		chainGenHashStr string
+		networkType        string
+		localhost          string
+		remotehost         string
+		r                  *router
+		chainGenCoordinate common.Coordinate
 	}
 	tests := []struct {
 		name string
@@ -47,11 +51,11 @@ func TestClientAndRouterCommunicate(t *testing.T) {
 		{
 			name: "test",
 			args: args{
-				networkType:     "tcp",
-				localhost:       "test1:3000",
-				remotehost:      "test2:3000",
-				r:               new(),
-				chainGenHashStr: "12345678901234567890123456789012",
+				networkType:        "tcp",
+				localhost:          ":3000",
+				remotehost:         "test2:3000",
+				r:                  new(),
+				chainGenCoordinate: common.Coordinate{},
 			},
 			want: true,
 		},
@@ -72,20 +76,14 @@ func TestClientAndRouterCommunicate(t *testing.T) {
 			}
 
 			pConn := &physicalConnection{
+				addr:  RemoteAddr(tt.args.remotehost),
 				Conn:  mc,
-				lConn: map[Hash256]*logicalConnection{},
+				lConn: map[common.Coordinate]*logicalConnection{},
 				r:     tt.args.r,
 			}
 			tt.args.r.pConn[RemoteAddr(tt.args.remotehost)] = pConn
 
-			hash, convErr := converterHash256([]byte(tt.args.chainGenHashStr))
-			if convErr != nil {
-				t.Errorf("New() = %v", convErr)
-			}
-			ch := tt.args.r.ReceiverChan(tt.args.remotehost, hash)
-			pConn.makeLogicalConnenction(hash)
-
-			clientSideReciver := <-ch
+			chainSideConn := pConn.makeLogicalConnenction(tt.args.chainGenCoordinate)
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
@@ -93,7 +91,7 @@ func TestClientAndRouterCommunicate(t *testing.T) {
 			var result1 bool
 
 			go func() {
-				data, err := clientSideReciver.Recv()
+				data, err := chainSideConn.Recv()
 				if err != nil {
 
 				}
@@ -102,13 +100,14 @@ func TestClientAndRouterCommunicate(t *testing.T) {
 				wg.Done()
 			}()
 
-			lConn, has := pConn.lConn[hash]
+			lConn, has := pConn.lConn[tt.args.chainGenCoordinate]
 			if !has {
 				t.Errorf("cannot found lConn")
 			}
 
 			go func() {
 				lConn.Send([]byte(routerSendMsg))
+				lConn.Flush()
 			}()
 
 			wg.Wait()
@@ -167,7 +166,7 @@ func TestClientAndRouterCommunicate(t *testing.T) {
 			}
 			tt.args.r.pConn[RemoteAddr(tt.args.remotehost)] = pConn
 
-			hash, convErr := converterHash256([]byte(tt.args.chainGenHashStr))
+			hash, convErr := ConverterHash256([]byte(tt.args.chainGenHashStr))
 			if convErr != nil {
 				t.Errorf("New() = %v", convErr)
 			}
@@ -251,7 +250,7 @@ func TestRouter_AddListen(t *testing.T) {
 			name: "test",
 			r:    new(),
 			args: args{
-				addr: ":3000",
+				addr: ":3002",
 			},
 			want: 1,
 		},
@@ -270,62 +269,12 @@ func TestRouter_AddListen(t *testing.T) {
 	}
 }
 
-func Test_Dial(t *testing.T) {
-	genesis, _ := converterHash256([]byte("12345678901234567890123456789012"))
-	type args struct {
-		addr    string
-		genesis Hash256
-	}
-	tests := []struct {
-		name string
-		r1   *router
-		r2   *router
-		args args
-		want bool
-	}{
-		{
-			name: "test",
-			r1:   new(),
-			r2:   new(),
-			args: args{
-				addr:    ":3000",
-				genesis: genesis,
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r1Addr := tt.r1.localAddr(tt.args.addr)
-
-			tt.r1.AddListen(tt.args.addr)
-			tt.r2.Dial(r1Addr, tt.args.genesis)
-
-			// listenCh := tt.r1.ReceiverChan(r2Addr, tt.args.genesis)
-			dialCh := tt.r2.ReceiverChan(r1Addr, tt.args.genesis)
-
-			recived := false
-			select {
-			case _, ok := <-dialCh:
-				if ok {
-					recived = true
-				}
-			default:
-			}
-
-			if tt.want != recived {
-				t.Errorf("Dial test wand %v but recived is %v", tt.want, recived)
-			}
-
-		})
-	}
-}
-
 func Test_Dial_Accept(t *testing.T) {
-	genesis, _ := converterHash256([]byte("12345678901234567890123456789012"))
+	var genesis common.Coordinate
+	copy(genesis[:], []byte("123451"))
 	type args struct {
 		addr    string
-		genesis Hash256
+		genesis common.Coordinate
 	}
 	tests := []struct {
 		name string
@@ -339,7 +288,7 @@ func Test_Dial_Accept(t *testing.T) {
 			r1:   new(),
 			r2:   new(),
 			args: args{
-				addr:    ":3000",
+				addr:    "test:3003",
 				genesis: genesis,
 			},
 			want: true,
@@ -347,147 +296,261 @@ func Test_Dial_Accept(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r1Addr := tt.r1.localAddr(tt.args.addr)
-
 			tt.r1.AddListen(tt.args.addr)
-			tt.r2.Dial(r1Addr, tt.args.genesis)
-
-			listenCh := tt.r1.ReceiverChan(tt.args.addr, tt.args.genesis)
-			dialCh := tt.r2.ReceiverChan(tt.args.addr, tt.args.genesis)
-
-			var err error
-			dialRecived := false
-			select {
-			case recv, ok := <-dialCh:
-				if ok {
-					dialRecived = true
-				}
-				err = recv.Send([]byte("test send"))
-			}
-
-			acceptRecived := false
-			select {
-			case _, ok := <-listenCh:
-
-				if ok {
-					acceptRecived = true
-				}
-			}
-
-			if err != nil {
-				t.Errorf("error detect %v", err)
-			}
-
-			if tt.want != dialRecived {
-				t.Errorf("Dial test wand %v but dialRecived is %v", tt.want, dialRecived)
-			}
-			if tt.want != acceptRecived {
-				t.Errorf("Dial test wand %v but acceptRecived is %v", tt.want, acceptRecived)
-			}
-
-		})
-	}
-}
-
-func TestRouter_Dial(t *testing.T) {
-	genesis, _ := converterHash256([]byte("12345678901234567890123456789012"))
-	type args struct {
-		addr    string
-		genesis Hash256
-	}
-	tests := []struct {
-		name string
-		r1   *router
-		r2   *router
-		args args
-		want bool
-	}{
-		{
-			name: "test",
-			r1:   new(),
-			r2:   new(),
-			args: args{
-				addr:    ":3000",
-				genesis: genesis,
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			clientSendMsg := "send client to router"
-			routerSendMsg := "send router to client"
-			var result1 bool
-			var result2 bool
-			r1Addr := tt.r1.localAddr(tt.args.addr)
-			r2Addr := tt.r2.localAddr(tt.args.addr)
-
-			tt.r1.AddListen(tt.args.addr)
-			tt.r2.Dial(r1Addr, tt.args.genesis)
-
-			ch1 := tt.r1.ReceiverChan(r2Addr, tt.args.genesis)
-			ch2 := tt.r2.ReceiverChan(r1Addr, tt.args.genesis)
 
 			wg := sync.WaitGroup{}
 			wg.Add(2)
 
-			go func() {
-				reciver1 := <-ch1
-				go func() {
-					// for {
-					data, err := reciver1.Recv()
-					result1 = string(data) == routerSendMsg
-					t.Log("clientSide rect : "+string(data)+" : ", err)
-					wg.Done()
-					// 	if !ok {
-					// 		break
-					// 	}
-					// }
-				}()
-				go func() {
-					err := reciver1.Send([]byte(clientSendMsg))
-					if err != nil && err != io.EOF {
-						t.Errorf("client Send err = %v", err)
-					}
-				}()
+			var result1 bool
 
+			go func() {
+				conn, _ := tt.r2.Dial(tt.args.addr, tt.args.genesis)
+				conn.Send([]byte("result"))
+				conn.Flush()
+				wg.Done()
 			}()
 			go func() {
-				reciver2 := <-ch2
-				go func() {
-					// for {
-					data, err := reciver2.Recv()
-					result2 = string(data) == clientSendMsg
-					t.Log("routerSide rect : "+string(data)+" : ", err)
-					wg.Done()
-					// 	if !ok {
-					// 		break
-					// 	}
-					// }
-				}()
-				go func() {
-					err := reciver2.Send([]byte(routerSendMsg))
-					if err != nil && err != io.EOF {
-						t.Errorf("router Send err = %v", err)
-					}
-				}()
-
+				conn, _ := tt.r1.Accept(tt.args.addr, tt.args.genesis)
+				bs, _ := conn.Recv()
+				result1 = string(bs) == "result"
+				wg.Done()
 			}()
 
 			wg.Wait()
 
-			if (tt.want != result1) || (tt.want != result2) {
-				t.Errorf("want %v, but recived router to client is %v and client to router is %v", tt.want, result1, result2)
+			if tt.want != result1 {
+				t.Errorf("Dial test wand %v but recived is %v", tt.want, result1)
 			}
+
+		})
+	}
+}
+
+func TestRouter_Data_PingPong(t *testing.T) {
+	var genesis1 common.Coordinate
+	copy(genesis1[:], []byte("123451"))
+	type args struct {
+		addr1    string
+		addr2    string
+		genesis1 common.Coordinate
+	}
+	tests := []struct {
+		name    string
+		r1      *router
+		r2      *router
+		r3      *router
+		args    args
+		wantErr error
+	}{
+		{
+			name: "test",
+			r1:   new(),
+			r2:   new(),
+			r3:   new(),
+			args: args{
+				addr1:    "test:3005",
+				addr2:    "test:3006",
+				genesis1: genesis1,
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.r1.AddListen(tt.args.addr1)
+			// tt.r2.AddListen(tt.args.addr2)
+
+			wg := sync.WaitGroup{}
+			wg.Add(3)
+
+			var resultErr error
+
+			go func() {
+				for {
+					conn, _ := tt.r1.Accept(tt.args.addr1, tt.args.genesis1)
+					err := read(conn, "ch1 1")
+					if err != nil {
+						resultErr = err
+					}
+					wg.Done()
+				}
+			}()
+			go func() {
+				conn, _ := tt.r2.Dial(tt.args.addr1, tt.args.genesis1)
+				err := read(conn, "ch1 2")
+				if err != nil {
+					resultErr = err
+				}
+				wg.Done()
+			}()
+			go func() {
+				time.Sleep(time.Millisecond * 100)
+				conn, _ := tt.r3.Dial(tt.args.addr1, tt.args.genesis1)
+				err := read(conn, "ch1 3")
+				if err != nil {
+					resultErr = err
+				}
+				wg.Done()
+			}()
+
+			wg.Wait()
+
+			if tt.wantErr != resultErr {
+				t.Errorf("Dial success and expect err is %v but return error is %v", tt.wantErr, resultErr)
+			}
+
+		})
+	}
+}
+
+func read(reciver Receiver, startStr string) error {
+	reciver.Send([]byte(startStr))
+	reciver.Flush()
+
+	for {
+		data, err := reciver.Recv()
+		log.Debug(string(data))
+		if strings.Contains(string(data), "rand") {
+			continue
+		}
+		str := string(data)
+		strs := strings.Split(str, ":")
+		i, err := strconv.Atoi(strs[len(strs)-1])
+		if err != nil {
+			strs = append(strs, "1")
+		} else {
+			i++
+			strs[len(strs)-1] = strconv.Itoa(i)
+		}
+		str = strings.Join(strs, ":")
+
+		time.Sleep(time.Millisecond * time.Duration(rand.Intn(10)))
+
+		reciver.Send([]byte(str))
+		err = reciver.Flush()
+		if err != nil {
+			if err != io.EOF {
+				log.Debug(string(data)+" : ", err)
+				break
+			}
+			return err
+		}
+		if i > 5 {
+			return nil
+		}
+	}
+	return nil
+}
+
+func TestRouter_Data_PingPong_multy_chain(t *testing.T) {
+	var genesis1 common.Coordinate
+	var genesis2 common.Coordinate
+	var genesis3 common.Coordinate
+	var genesis4 common.Coordinate
+	copy(genesis1[:], []byte("123451"))
+	copy(genesis2[:], []byte("123452"))
+	copy(genesis3[:], []byte("123453"))
+	copy(genesis4[:], []byte("123454"))
+	type args struct {
+		addr1    string
+		addr2    string
+		genesis1 common.Coordinate
+		genesis2 common.Coordinate
+		genesis3 common.Coordinate
+		genesis4 common.Coordinate
+	}
+	tests := []struct {
+		name string
+		r1   *router
+		r2   *router
+		args args
+		want int
+	}{
+		{
+			name: "test",
+			r1:   new(),
+			r2:   new(),
+			args: args{
+				addr1:    "test:3005",
+				addr2:    "test:3006",
+				genesis1: genesis1,
+				genesis2: genesis2,
+				genesis3: genesis3,
+				genesis4: genesis4,
+			},
+			want: 8,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.r1.AddListen(tt.args.addr1)
+			// tt.r2.AddListen(tt.args.addr2)
+
+			wg := sync.WaitGroup{}
+			wg.Add(8)
+
+			go func() {
+				conn, _ := tt.r1.Accept(tt.args.addr1, tt.args.genesis1)
+				read(conn, "ch1 1")
+				wg.Done()
+			}()
+			go func() {
+				conn, _ := tt.r2.Dial(tt.args.addr1, tt.args.genesis1)
+				read(conn, "ch1 2")
+				wg.Done()
+			}()
+
+			go func() {
+				time.Sleep(time.Millisecond * 1000)
+				go func() {
+					conn, _ := tt.r1.Accept(tt.args.addr1, tt.args.genesis2)
+					read(conn, "ch2 1")
+					wg.Done()
+				}()
+				go func() {
+					conn, _ := tt.r2.Dial(tt.args.addr1, tt.args.genesis2)
+					read(conn, "ch2 2")
+					wg.Done()
+				}()
+			}()
+			go func() {
+				conn, _ := tt.r1.Accept(tt.args.addr1, tt.args.genesis3)
+				read(conn, "ch3 1")
+				wg.Done()
+			}()
+			go func() {
+				conn, _ := tt.r2.Dial(tt.args.addr1, tt.args.genesis3)
+				read(conn, "ch3 2")
+				wg.Done()
+			}()
+			go func() {
+				time.Sleep(time.Millisecond * 1000)
+				go func() {
+					conn, _ := tt.r1.Accept(tt.args.addr1, tt.args.genesis4)
+					read(conn, "ch4 1")
+					wg.Done()
+				}()
+				go func() {
+					conn, _ := tt.r2.Dial(tt.args.addr1, tt.args.genesis4)
+					read(conn, "ch4 2")
+					wg.Done()
+				}()
+			}()
+
+			// time.Sleep(time.Second)
+			wg.Wait()
 		})
 	}
 }
 
 func Test(t *testing.T) {
-	genesis, _ := converterHash256([]byte("12345678901234567890123456789012"))
+	var genesis common.Coordinate
+	copy(genesis[:], []byte("123451"))
 	type args struct {
 		addr    string
-		genesis Hash256
+		genesis common.Coordinate
 	}
 	tests := []struct {
 		name string
@@ -501,7 +564,7 @@ func Test(t *testing.T) {
 			r1:   new(),
 			r2:   new(),
 			args: args{
-				addr:    ":3000",
+				addr:    ":3007",
 				genesis: genesis,
 			},
 			want: true,
