@@ -288,7 +288,7 @@ func Test_Dial_Accept(t *testing.T) {
 			r1:   new(),
 			r2:   new(),
 			args: args{
-				addr:    "test:3003",
+				addr:    ":3003",
 				genesis: genesis,
 			},
 			want: true,
@@ -304,7 +304,7 @@ func Test_Dial_Accept(t *testing.T) {
 			var result1 bool
 
 			go func() {
-				conn, _ := tt.r2.Dial(tt.args.addr, tt.args.genesis)
+				conn, _ := tt.r2.Dial("localhost"+tt.args.addr, tt.args.genesis)
 				conn.Send([]byte("result"))
 				conn.Flush()
 				wg.Done()

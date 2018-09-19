@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"fleta/mock/mocknet"
 	"fleta/samutil"
 
 	"git.fleta.io/common/log"
@@ -21,8 +20,6 @@ type Router interface {
 	AddListen(addr string) error
 	Dial(addrStr string, genesis common.Coordinate) (Receiver, error)
 	Accept(addrStr string, genesis common.Coordinate) (Receiver, error)
-	// PhysicalConnection(addr string) bool
-	// LogicalConnection(addr string, genesis Hash256) bool
 }
 
 type router struct {
@@ -62,8 +59,8 @@ func (r *router) localAddr(addr string) string {
 func (r *router) AddListen(addr string) error {
 	_, has := r.Listeners[RemoteAddr(addr)]
 	if !has {
-		l, err := mocknet.Listen("tcp", addr)
-		// l, err := net.Listen("tcp", addr)
+		// l, err := mocknet.Listen("tcp", addr)
+		l, err := net.Listen("tcp", addr)
 		log.Debug("Listen ", addr, l.Addr().String())
 		if err != nil {
 			return err
@@ -134,7 +131,9 @@ func (r *router) Accept(addrStr string, genesis common.Coordinate) (Receiver, er
 
 func (r *router) AcceptConn(conn Receiver, genesis common.Coordinate) error {
 	r.acceptLock.Lock()
-	l, has := r.Listeners[RemoteAddr(conn.LocalAddr().String())]
+	listenAddrs := strings.Split(conn.LocalAddr().String(), ":")
+	listenAddr := ":" + listenAddrs[len(listenAddrs)-1]
+	l, has := r.Listeners[RemoteAddr(listenAddr)]
 	if !has {
 		r.acceptLock.Unlock()
 		return ErrListenFirst
@@ -173,8 +172,8 @@ func (r *router) Dial(addrStr string, genesis common.Coordinate) (Receiver, erro
 	if !has {
 		localhost := r.localAddr(addrStr)
 		log.Debug("Dial ", " ", addrStr, " ", localhost)
-		conn, err := mocknet.Dial("tcp", addrStr, localhost)
-		// conn, err := net.Dial("tcp", addrStr)
+		// conn, err := mocknet.Dial("tcp", addrStr, localhost)
+		conn, err := net.Dial("tcp", addrStr)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +189,6 @@ func (r *router) Dial(addrStr string, genesis common.Coordinate) (Receiver, erro
 	pConn.handshake(genesis)
 
 	return pConn.makeLogicalConnenction(genesis), nil
-	return nil, nil
 }
 
 func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
