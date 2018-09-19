@@ -3,42 +3,38 @@
 하나의 connection으로 들어오는 packet을 각 chain의 coordinate로 구분하여 분배하는 과정을 추가하여 chain간의 독립적인 통신을 지원합니다.
 
 #examples
-<pre><code>
-	r := router.New()    // 라우터 생성
-	r.AddListen(":3000") // listen 과정
+<pre><code>r := router.New()    // 라우터 생성
+r.AddListen(":3000") // listen 과정
 
-	wg := sync.WaitGroup{} // wg : 테스트 코드를 모두 수행할때 까지 wait시킬 WaitGroup
-	wg.Add(2)              // wg : 전송하고 받는 2가지 케이스를 wait
+wg := sync.WaitGroup{} // wg : 테스트 코드를 모두 수행할때 까지 wait시킬 WaitGroup
+wg.Add(2)              // wg : 전송하고 받는 2가지 케이스를 wait
 
-	go func() {
-		receiver, err := r.Accept(":3000", common.Coordinate{}) // 다른 라우터에서 dial 을 accept
-		if err != nil {                                         // receiver를 받은 이후 에러가 발생 할 경우 패닉처리
-			panic(err)
-		}
-		receiver.Send([]byte("test send")) // receiver에 test messgae 전송
-		receiver.Flush()                   // flush
-		wg.Done()                          // wg : 전송하는 케이스 완료
-	}()
+go func() {
+    receiver, err := r.Accept(":3000", common.Coordinate{}) // 다른 라우터에서 dial 을 accept
+    if err != nil {                                         // receiver를 받은 이후 에러가 발생 할 경우 패닉처리
+        panic(err)
+    }
+    receiver.Send([]byte("test send")) // receiver에 test messgae 전송
+    receiver.Flush()                   // flush
+    wg.Done()                          // wg : 전송하는 케이스 완료
+}()
 
-	go func() {
-		otherRouter := router.New()                                              // 다른 라우터를 생성
-		receiver, err := otherRouter.Dial("localhost:3000", common.Coordinate{}) // 로컬 호스트에 연결
-		if err != nil {                                                          // receiver를 받은 이후 에러가 발생 할 경우 패닉처리
-			panic(err)
-		}
-		bs, err := receiver.Recv() // message를 전송받을 대기중 맞 연결된 receiver에서 send/flush를 하면 []byte를 받음
-		if err != nil {            // data를 받은 이후 에러가 발생 할 경우 패닉처리
-			panic(err)
-		}
-		log.Println(string(bs)) // 전송받은 message를 출력
-		wg.Done()               // wg : 받는 케이스 완료
-	}()
+go func() {
+    otherRouter := router.New()                                              // 다른 라우터를 생성
+    receiver, err := otherRouter.Dial("localhost:3000", common.Coordinate{}) // 로컬 호스트에 연결
+    if err != nil {                                                          // receiver를 받은 이후 에러가 발생 할 경우 패닉처리
+        panic(err)
+    }
+    bs, err := receiver.Recv() // message를 전송받을 대기중 맞 연결된 receiver에서 send/flush를 하면 []byte를 받음
+    if err != nil {            // data를 받은 이후 에러가 발생 할 경우 패닉처리
+        panic(err)
+    }
+    log.Println(string(bs)) // 전송받은 message를 출력
+    wg.Done()               // wg : 받는 케이스 완료
+}()
 
-	wg.Wait() // wg : 2가지 케이스가 완료 될 때까지 대기
-
+wg.Wait() // wg : 2가지 케이스가 완료 될 때까지 대기
 </code></pre>
-
-*********
 
 # Functions
 <pre><code>
@@ -60,7 +56,7 @@ type Receiver interface {
 	Close()
 }
 </code></pre>
-*********
+
 ## Router
 
 ### AddListen(port string) error
@@ -88,7 +84,6 @@ Dial요청이 들어오면 발생하면 handshake과정을 거처 Dial에 기제
 Dial의 addr, coordinate와 1:1 쌍이 이룹니다.
 </code></pre>
 
-*********
 ## Receiver
 
 ### Recv() ([]byte, error)
