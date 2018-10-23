@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"git.fleta.io/fleta/framework/log"
-	"git.fleta.io/fleta/mock"
-	"git.fleta.io/fleta/mock/mocknetwork"
-	"git.fleta.io/fleta/mock/simulationlog"
-	"git.fleta.io/fleta/samutil"
+	"git.fleta.io/fleta/mocknet"
+	"git.fleta.io/fleta/mocknet/mocknetwork"
+	"git.fleta.io/fleta/mocknet/simulationlog"
+	"git.fleta.io/fleta/mocknet/util"
 )
 
 var myID string
@@ -62,8 +62,8 @@ type mockConn struct {
 }
 
 func mockDelay(address string, target string) time.Duration {
-	address = samutil.Sha256HexString2(address)
-	target = samutil.Sha256HexString2(target)
+	address = util.Sha256HexString2(address)
+	target = util.Sha256HexString2(target)
 
 	a, _ := strconv.ParseInt(string(target[0]), 16, 64)
 	b, _ := strconv.ParseInt(string(address[0]), 16, 64)

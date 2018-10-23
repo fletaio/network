@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/mock"
-	"git.fleta.io/fleta/mock/concentrator"
-	util "git.fleta.io/fleta/samutil"
+	"git.fleta.io/fleta/mocknet"
+	"git.fleta.io/fleta/mocknet/concentrator"
+	"git.fleta.io/fleta/mocknet/util"
 
 	"git.fleta.io/fleta/framework/log"
 )

@@ -25,7 +25,7 @@ var receiver chan<- Msg
 func VisualizationStart(data <-chan Visualization, nodeAdder chan<- Msg) {
 	http.HandleFunc("/ws", wsHandler)
 	// http.HandleFunc("/", rootHandler)
-	http.Handle("/", http.FileServer(http.Dir("./git.fleta.io/fleta/mock/concentrator/html/")))
+	http.Handle("/", http.FileServer(http.Dir("./git.fleta.io/fleta/mocknet/concentrator/html/")))
 
 	sender = data
 	receiver = nodeAdder
@@ -35,7 +35,7 @@ func VisualizationStart(data <-chan Visualization, nodeAdder chan<- Msg) {
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	pwd, _ := os.Getwd()
-	content, err := ioutil.ReadFile(pwd + "/git.fleta.io/fleta/mock/concentrator/html/index.html")
+	content, err := ioutil.ReadFile(pwd + "/git.fleta.io/fleta/mocknet/concentrator/html/index.html")
 	if err != nil {
 		fmt.Println("Could not open file.", err)
 	}
