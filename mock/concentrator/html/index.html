@@ -1,0 +1,427 @@
+<html>
+<head>
+    <title>WebSocket demo</title>
+</head>
+<body>
+
+    <div>
+        <form>
+            <label for="numberfield">Number</label>
+            <input type="text" id="numberfield" value="10"/><br />
+            <button type="button" id="empty">empty</button>
+            <button type="button" id="addFormulator">Add Formulator</button>
+            <button type="button" id="makeBreak">make break</button>
+        </form>
+    </div>
+	<div id="spreadTable"></div>
+	<div id="spreadTableHeight"></div>
+    <div id="container"></div>
+    <div id="draw"></div>
+
+	<style>
+		#spreadTableHeight {
+			height: 1px;
+		}
+		.link {
+			fill: none;
+			stroke: #666;
+			stroke-width: 1.5px;
+		}
+
+		.node circle {
+			fill: #ccc;
+			stroke: #fff;
+			stroke-width: 1.5px;
+		}
+
+		text {
+			font: 10px sans-serif;
+			pointer-events: none;
+		}
+
+		#spreadTable div {
+			float: left;
+		}
+		#spreadTable > div > div:nth-child(1) {
+			background-color: aqua
+		}
+		#spreadTable > div > div:nth-child(2) {
+			background-color: coral
+		}
+		#spreadTable > div > div:nth-child(3) {
+			background-color: darkred
+		}
+		#spreadTable p {
+			width: 15px;
+			height: 15px;
+			overflow: hidden;
+			padding: 0;
+    		margin: 0;
+			border: 1px solid #000000;
+			cursor: default;
+			font-size: 8px;
+			text-align: center;
+		}
+	</style>
+    <script type="text/javascript" src="/js/jquery/jquery-2.1.1.min.js"></script>
+    <script type="text/javascript" src="/js/d3.v3.min.js"></script>
+	<script type="text/javascript">
+	function toID (str, prefix) {
+		return prefix+str.replace(/[ \t]/ig, "_")
+	}
+	function buildSpreadTable (data) {
+		var $spreadTable = $("#spreadTable")
+		var d = Date()
+		for (p in data) {
+			var datap = data[p]
+			p = toID(p,"p")
+
+			var $p = $spreadTable.find("#"+p)
+			if ($p.length == 0) {
+				$p = $("<div id='"+p+"'>")
+				$spreadTable.append($p)
+			}
+
+			for (type in datap) {
+				var dataType = datap[type]
+				type = toID(type, "type")
+				var $t = $p.find("#"+type)
+				if ($t.length == 0) {
+					$t = $("<div id='"+type+"'>")
+					$p.append($t)
+				}
+
+				dataType.sort()
+				var $ps = $t.find("p")
+				$ps.each(function (i, e) {
+					var $e = $(e)
+					var eleId = $e.attr("id").replace("ele", "").replace(/_/gi, " ")
+					if (typeof dataType[eleId] === "undefined") {
+						$e.remove()
+					}
+				})
+
+				for (ele in dataType) {
+					var dataEle = dataType[ele]
+					ele = toID(ele, "ele")
+					var $e = $t.find("#"+ele)
+					if ($e.length == 0) {
+						$e = $("<p id='"+ele+"'>")
+						$t.append($e)
+					}
+					$e.attr("title", dataEle).html(dataEle.split(":")[0])
+				}
+			}
+
+		}
+		// $spreadTable.find("p[date!='"+d+"']").remove()
+		
+		$("#spreadTableHeight").height($spreadTable.height())
+	}
+	var roopCount = 0
+        $(function () {
+            var ws;
+            var connection = false
+            if (window.WebSocket === undefined) {
+                $("#container").append("Your browser does not support WebSockets");
+                return;
+            } else {
+                ws = initWS();
+            }
+            function initWS() {
+                var socket = new WebSocket("ws://localhost:8080/ws"),
+                    container = $("#container")
+                socket.onopen = function() {
+                    connection = true
+                    container.html("<p>Socket is open</p>");
+                };
+                socket.onmessage = function (e) {
+					var data = JSON.parse(e.data)
+					var linkPLData = {};
+					var summuryData = {};
+					var fullData = {};
+					var totalCount = {};
+					for (nodeID in data) {
+						summuryData[nodeID] = {}
+						fullData[nodeID] = {}
+						for (panel in data[nodeID]) {
+							if (typeof totalCount[panel] === "undefined") {
+								totalCount[panel] = 0
+							}
+							var panelData = data[nodeID][panel]
+							if (panelData !== null) {
+								totalCount[panel] += panelData.length
+								summuryData[nodeID][panel] = panelData.length
+								fullData[nodeID][panel] = []
+							}
+							if (typeof linkPLData[panel] === "undefined") {
+								linkPLData[panel] = []
+							}
+							for (plID in panelData) {
+								fullData[nodeID][panel].push(panelData[plID])
+								if (nodeID != panelData[plID]) {
+									linkPLData[panel].push({
+										source: nodeID,
+										target: panelData[plID]
+									});
+								}
+							}
+						}
+
+					}
+					for (panel in linkPLData) {
+						spreadMap(panel, linkPLData[panel])
+					}
+
+					buildSpreadTable(fullData)
+					// d = JSON.stringify(summuryData)
+                    // container.html((roopCount++)+"<br/>"+JSON.stringify(totalCount)+"<br/>"+d.replace(/},\"/gi, "},<br/>\""));
+                    container.html((roopCount++)+"<br/>"+JSON.stringify(totalCount));
+                }
+                socket.onclose = function () {
+                    connection = false
+                    container.html("<p>Socket closed</p>");
+                }
+                return socket;
+            }
+
+            $("#empty").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "empty",
+					Num: parseInt($("#numberfield").val())
+				}));
+                // if (connection == false) {
+                //     ws = initWS();
+                // }
+            })
+            $("#addFormulator").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "addFormulator",
+					Num: parseInt($("#numberfield").val())
+				}));
+            });
+            $("#makeBreak").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "makeBreak",
+					Num: parseInt($("#numberfield").val()) 
+				}));
+            });
+
+        })
+
+		var map = {}
+		var mapNodes = {}
+
+function spreadMap (caseId, links) {
+	// http://blog.thomsonreuters.com/index.php/mobile-patent-suits-graphic-of-the-day/
+	var nodes = {};
+	
+	// Compute the distinct nodes from the links.
+	links.forEach(function(link) {
+	  link.source = nodes[link.source] || (nodes[link.source] = {name: link.source});
+	  link.target = nodes[link.target] || (nodes[link.target] = {name: link.target});
+	});
+	
+	var width = $("body").width(),
+	    height = 900;
+	
+	var force = d3.layout.force()
+	    .nodes(d3.values(nodes))
+	    .links(links)
+	    .size([width, height])
+	    .linkDistance(Math.min(width/10, 100))
+	    .charge(-400)
+	    .on("tick", tick)
+	    .start();
+	
+	var svg = d3.select("#mapPageRepresentCase").append("svg")
+	    .attr("width", width)
+	    .attr("height", height);
+	
+	var link = svg.selectAll(".link")
+	    .data(force.links())
+	  .enter().append("line")
+	    .attr("class", "link");
+	
+	var node = svg.selectAll(".node")
+	    .data(force.nodes())
+	  .enter().append("g")
+	    .attr("class", "node")
+	    .on("mouseover", mouseover)
+	    .on("mouseout", mouseout)
+	    .on("dblclick", openPage)
+	    .call(force.drag);
+	
+	node.append("circle")
+	    .attr("r", 8);
+	
+	node.append("pageId")
+	    .attr("pageId", function(d) { return d.name; });
+	
+	node.append("text")
+	    .attr("x", 12)
+	    .attr("dy", ".35em")
+	    .text(function(d) { return d.name; });
+	
+	function tick() {
+	  link
+	      .attr("x1", function(d) { return d.source.x; })
+	      .attr("y1", function(d) { return d.source.y; })
+	      .attr("x2", function(d) { return d.target.x; })
+	      .attr("y2", function(d) { return d.target.y; });
+	
+	  node
+	      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+	}
+	
+	function openPage() {
+		location.href="#"+d3.select(this).select("text").text()+".page";
+	}
+	
+	function mouseover() {
+	  d3.select(this).select("circle").transition()
+	      .duration(750)
+	      .attr("r", 16);
+	}
+	
+	function mouseout() {
+	  d3.select(this).select("circle").transition()
+	      .duration(750)
+	      .attr("r", 8);
+	}
+	
+}
+
+		function spreadMap (caseId, links) {
+			// http://blog.thomsonreuters.com/index.php/mobile-patent-suits-graphic-of-the-day/
+			if (typeof mapNodes[caseId] === "undefined") {
+				mapNodes[caseId] = {
+					count: 0,
+					nodes : {},
+				}
+			}
+
+			if ( mapNodes[caseId].count == links.length) {
+				return
+			}
+			mapNodes[caseId].count = links.length
+
+			// Compute the distinct nodes from the links.
+			links.forEach(function(link) {
+				link.source = mapNodes[caseId].nodes[link.source] || (mapNodes[caseId].nodes[link.source] = {name: link.source});
+				link.target = mapNodes[caseId].nodes[link.target] || (mapNodes[caseId].nodes[link.target] = {name: link.target});
+			});
+
+			
+			var width = $("body").width(),
+				height = 900;
+
+			if (typeof map[caseId] === "undefined") {
+				map[caseId] = d3.layout.force()
+					.nodes(d3.values(mapNodes[caseId].nodes))
+					.size([width, height])
+					.linkDistance(Math.min(width/2, 1000))
+					.charge(-400)
+					.on("tick", tick)
+					.links(links)
+					.start();
+				
+				mapNodes[caseId].svg = d3.select("#"+caseId).append("svg")
+					.attr("width", width)
+					.attr("height", height);
+				
+				mapNodes[caseId].link = mapNodes[caseId].svg.selectAll(".link");
+				
+				mapNodes[caseId].node = mapNodes[caseId].svg.selectAll(".node")
+				;
+				mapNodes[caseId].link.data(map[caseId].links())
+				.enter().append("line")
+					.attr("class", "link");
+				mapNodes[caseId].node.data(map[caseId].nodes())
+				.enter().append("g")
+					.attr("class", "node")
+					.on("mouseover", mouseover)
+					.on("mouseout", mouseout)
+					.on("dblclick", openPage)
+					.call(map[caseId].drag);				
+			} else {
+				map[caseId].nodes(d3.values(mapNodes[caseId].nodes)).links(links).start();
+			
+				mapNodes[caseId].svg.selectAll(".link").data(map[caseId].links())
+				mapNodes[caseId].svg.selectAll(".node").data(map[caseId].nodes())
+
+				// 			mapNodes[caseId].node.append("circle")
+				// .attr("r", 8);
+			
+				// mapNodes[caseId].node.append("pageId")
+				// 	.attr("pageId", function(d) { return d.name; });
+				
+				// mapNodes[caseId].node.append("text")
+				// 	.attr("x", 12)
+				// 	.attr("dy", ".35em")
+				// 	.text(function(d) { return d.name; });
+				
+				// function tick() {
+				// mapNodes[caseId].link
+				// 	.attr("x1", function(d) { return d.source.x; })
+				// 	.attr("y1", function(d) { return d.source.y; })
+				// 	.attr("x2", function(d) { return d.target.x; })
+				// 	.attr("y2", function(d) { return d.target.y; });
+				
+				// mapNodes[caseId].node
+				// 	.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+				// }
+				// return
+			}
+
+			if ($("#draw").find("#"+caseId).length ==0 ) {
+				$("#draw").append("<div id=\""+caseId+"\">")
+			}
+			
+
+			
+			mapNodes[caseId].node.append("circle")
+				.attr("r", 8);
+			
+			mapNodes[caseId].node.append("pageId")
+				.attr("pageId", function(d) { return d.name; });
+			
+			mapNodes[caseId].node.append("text")
+				.attr("x", 12)
+				.attr("dy", ".35em")
+				.text(function(d) { return d.name; });
+			
+			function tick() {
+				mapNodes[caseId].link
+					.attr("x1", function(d) { return d.source.x; })
+					.attr("y1", function(d) { return d.source.y; })
+					.attr("x2", function(d) { return d.target.x; })
+					.attr("y2", function(d) { return d.target.y; });
+				
+				mapNodes[caseId].node
+					.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+			}
+			
+			function openPage() {
+				location.href="#"+d3.select(this).select("text").text()+".page";
+			}
+			
+			function mouseover() {
+			d3.select(this).select("circle").transition()
+				.duration(750)
+				.attr("r", 16);
+			}
+			
+			function mouseout() {
+			d3.select(this).select("circle").transition()
+				.duration(750)
+				.attr("r", 8);
+			}
+			
+		}
+    </script>
+</body>
+</html>
