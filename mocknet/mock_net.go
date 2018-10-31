@@ -14,7 +14,6 @@ import (
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/mocknet"
 	"git.fleta.io/fleta/mocknet/mocknetwork"
-	"git.fleta.io/fleta/mocknet/simulationlog"
 	"git.fleta.io/fleta/mocknet/util"
 )
 
@@ -114,7 +113,6 @@ func (c *mockConn) Write(b []byte) (n int, err error) {
 }
 
 func (c *mockConn) Close() error {
-	simulationlog.Close(c.LocalAddr().String(), c.RemoteAddr().String())
 	c.Conn.Close()
 	return nil
 }
@@ -181,8 +179,6 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 			writeDeadline: -1,
 		}
 
-		simulationlog.Dial(mc.LocalAddr().String(), mc.RemoteAddr().String(), delay)
-
 		return mc, nil
 	}
 
@@ -217,8 +213,6 @@ func Dial(networkType, address string, localhost string) (net.Conn, error) {
 		readDeadline:  -1,
 		writeDeadline: -1,
 	}
-
-	simulationlog.Dial(mc.LocalAddr().String(), mc.RemoteAddr().String(), delay)
 
 	return mc, nil
 }
@@ -271,12 +265,12 @@ func (l *mockListener) Addr() net.Addr {
 // Listen announces on the local network address.
 func Listen(networkType, addr string) (net.Listener, error) {
 	// var addr string
-	if strings.Contains(addr, ":") {
-		strs := strings.Split(addr, ":")
-		if strs[0] == "" {
-			addr = mocknetwork.GetMainID() + addr
-		}
-	}
+	// if strings.Contains(addr, ":") {
+	// 	strs := strings.Split(addr, ":")
+	// if strs[0] == "" {
+	// 	addr = mocknetwork.GetMainID() + addr
+	// }
+	// }
 	var l net.Listener
 
 	ml := mockListener{
@@ -285,9 +279,9 @@ func Listen(networkType, addr string) (net.Listener, error) {
 			address: addr,
 		},
 	}
+	log.Debug("Listen : ", addr)
 
 	ml.waitAccept()
-	simulationlog.Listen(addr)
 
 	l = &ml
 
