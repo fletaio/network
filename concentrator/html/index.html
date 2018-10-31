@@ -7,9 +7,10 @@
     <div>
         <form>
             <label for="numberfield">Number</label>
-            <input type="text" id="numberfield" value="10"/><br />
+            <input type="text" id="numberfield" value="1"/><br />
             <button type="button" id="empty">empty</button>
             <button type="button" id="addFormulator">Add Formulator</button>
+            <button type="button" id="makeBlock">Make Block</button>
             <button type="button" id="makeBreak">make break</button>
         </form>
     </div>
@@ -200,6 +201,13 @@
                 ws.send(JSON.stringify({
 					Command: "addFormulator",
 					Num: parseInt($("#numberfield").val())
+				}));
+            });
+            $("#makeBlock").click(function (e) {
+                e.preventDefault();
+                ws.send(JSON.stringify({
+					Command: "makeBlock",
+					Num: parseInt($("#numberfield").val()) 
 				}));
             });
             $("#makeBreak").click(function (e) {

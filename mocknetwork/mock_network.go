@@ -1,15 +1,8 @@
 package mocknetwork
 
 import (
-	"encoding/binary"
-	"encoding/hex"
-	"fmt"
 	"net"
-	"os"
-	"regexp"
-	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,25 +13,25 @@ import (
 	"git.fleta.io/fleta/framework/log"
 )
 
-//IFleta Fleta interface
-type IFleta interface {
-	Start(i int) error
-	NewFleta() IFleta
+//IPlayer player interface
+type IPlayer interface {
+	Start() error
+	MakeBlock()
 	VisualizationData() map[string][]string
 }
 
-var fletaTest IFleta
+var pCreator func() IPlayer
 
-//Fleta is set Fleta
-func Fleta(_fleta IFleta) {
-	fletaTest = _fleta
+//Player is set player
+func Player(p func() IPlayer) {
+	pCreator = p
 }
 
 // NodeInfo has node infomation type, ID, data channel
 type NodeInfo struct {
 	Address       string
 	ConnParamChan chan ConnParam
-	ft            IFleta
+	ft            IPlayer
 }
 
 //Addr TODO
@@ -79,8 +72,6 @@ func StoreNodeMap(key string, n NodeInfo) {
 
 //Run is start mocknetwork
 func Run() {
-	os.RemoveAll("./hardstate")
-
 	mockCount := simulationdata.InitNodeCount
 
 	go func() {
@@ -102,9 +93,13 @@ var addLock sync.Mutex
 //AddFleta TODO
 func AddFleta() {
 	addLock.Lock()
-	appendNode(totalCount)
+	StartWithID(totalCount, func() {
+		appendNode()
+	})
 	go func(i int) {
-		LoadNodeMap(util.Sha256HexInt(i)).ft.Start(i)
+		StartWithID(i, func() {
+			LoadNodeMap(util.Sha256HexInt(i)).ft.Start()
+		})
 		// go mockDataSend(i)
 	}(totalCount)
 	totalCount++
@@ -123,6 +118,12 @@ func NodeAdder(sender <-chan concentrator.Msg) {
 		case "addFormulator":
 			for i := 0; i < msg.Num; i++ {
 				AddFleta()
+			}
+		case "makeBlock":
+			for i := 0; i < totalCount; i++ {
+				StartWithID(i, func() {
+					LoadNodeMap(util.Sha256HexInt(i)).ft.MakeBlock()
+				})
 			}
 		case "makeBreak":
 			log.Debug("makeBreak")
@@ -157,31 +158,24 @@ func sendVisualizationData(sender chan<- concentrator.Visualization) {
 // 	}
 // }
 
-func appendNode(i int) {
+func appendNode() {
+	i := GetSimulationID()
 	appendNodeAddress(util.Sha256HexString(strconv.Itoa(i)))
 }
 
 func appendNodeAddress(addr string) {
-	var ft IFleta
-	if fletaTest != nil {
-		ft = fletaTest.NewFleta()
-	}
 	nodeInfo := NodeInfo{
 		Address: addr,
-		ft:      ft,
 	}
-
 	StoreNodeMap(nodeInfo.Address, nodeInfo)
 }
 
 func childIDGen(nodeID string, index int) string {
 	runes := []rune(nodeID)
 
-	var strBuilder strings.Builder
-	strBuilder.WriteString(string(runes[index:]))
-	strBuilder.WriteString(string(runes[:index]))
+	s := string(runes[index:]) + string(runes[:index])
 
-	return util.Sha256HexString(strBuilder.String())
+	return util.Sha256HexString(s)
 }
 
 //ConnParam has Reader, Writer, network, address
@@ -226,54 +220,30 @@ func RegistAccept(addr string) (node NodeInfo) {
 	return node
 }
 
-//Ping is ping to input address
-func Ping(address string) {
-	my := GetMainID()
-	log.Debug(my)
-	log.Debug(address)
-	// log.Println(my)
-	// log.Println(address)
+// //GetMainID is tracking call-stack until find "fleta.(*Fleta).Start" and return that ID
+// //HARD DEFENDENCE ON MOCKNETWORK
+// func GetMainID() string {
+// 	buf := make([]byte, 1<<16)
+// 	runtime.Stack(buf, true)
+// 	strs := strings.Split(string(buf), "\n")
+// 	re := regexp.MustCompile("fleta.\\(\\*Fleta\\).Start[^(]*\\(")
+// 	for _, str := range strs {
+// 		if strings.Contains(str, "fleta.(*Fleta).Start") {
+// 			str = re.ReplaceAllLiteralString(str, "")
+// 			str = strings.TrimRight(str, ")")
+// 			ids := strings.Split(str, ",")
+// 			if len(ids) >= 2 {
+// 				var num int64
+// 				num, err := strconv.ParseInt(strings.TrimPrefix(ids[1], " 0x"), 16, 32)
+// 				if err != nil {
+// 					log.Fatal(err)
+// 				}
+// 				i := int(num)
+// 				return util.Sha256HexInt(i)
 
-	myDecoded, err := hex.DecodeString(my)
-	if err != nil {
-		log.Fatal(err)
-	}
-	addressDecoded, err := hex.DecodeString(address)
-	if err != nil {
-		log.Fatal(err)
-	}
+// 			}
+// 		}
+// 	}
 
-	data := binary.BigEndian.Uint32(myDecoded[:4]) - binary.BigEndian.Uint32(addressDecoded[:4])
-
-	fmt.Printf("%s\n", myDecoded)
-	fmt.Printf("%s\n", addressDecoded)
-	fmt.Printf("%d\n", data)
-}
-
-//GetMainID is tracking call-stack until find "fleta.(*Fleta).Start" and return that ID
-//HARD DEFENDENCE ON MOCKNETWORK
-func GetMainID() string {
-	buf := make([]byte, 1<<16)
-	runtime.Stack(buf, true)
-	strs := strings.Split(string(buf), "\n")
-	re := regexp.MustCompile("fleta.\\(\\*Fleta\\).Start[^(]*\\(")
-	for _, str := range strs {
-		if strings.Contains(str, "fleta.(*Fleta).Start") {
-			str = re.ReplaceAllLiteralString(str, "")
-			str = strings.TrimRight(str, ")")
-			ids := strings.Split(str, ",")
-			if len(ids) >= 2 {
-				var num int64
-				num, err := strconv.ParseInt(strings.TrimPrefix(ids[1], " 0x"), 16, 32)
-				if err != nil {
-					log.Fatal(err)
-				}
-				i := int(num)
-				return util.Sha256HexInt(i)
-
-			}
-		}
-	}
-
-	return util.Sha256HexInt(-1)
-}
+// 	return util.Sha256HexInt(-1)
+// }
