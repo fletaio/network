@@ -94,7 +94,7 @@ func (c *mockConn) Log(format string, msg ...interface{}) {
 
 	format = string(append([]byte("mocknet %30s %s %s->%s "), append([]byte(format), []byte("\n")...)...))
 
-	log.Alertf(format, msg...)
+	log.Infof(format, msg...)
 }
 
 func (c *mockConn) Read(b []byte) (n int, err error) {
