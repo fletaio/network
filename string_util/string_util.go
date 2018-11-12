@@ -1,4 +1,4 @@
-package util
+package stringutil
 
 import (
 	"crypto/sha256"

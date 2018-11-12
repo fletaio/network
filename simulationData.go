@@ -1,4 +1,4 @@
-package simulationdata
+package mocknet
 
 //simulation init count of node
 const (
@@ -8,5 +8,5 @@ const (
 //mocknet delay param
 const (
 	Delay     = true
-	DelayUnit = 20 // 1(0~32) 2(0~64) ~
+	DelayUnit = 2 // 1(0~32) 2(0~64) ~
 )
