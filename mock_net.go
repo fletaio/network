@@ -3,7 +3,6 @@ package mocknet
 import (
 	"context"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,69 +51,72 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 
 //Dial is return Conn
 // func Dial(networkType, address string, localhost string) (net.Conn, error) {
-func Dial(localhost, address string) (net.Conn, error) {
-	addrs := strings.Split(address, ":")
-	port := addrs[len(addrs)-1]
+func Dial(network, address string) (net.Conn, error) {
+	if strings.HasPrefix(network, "mock") {
+		addrs := strings.Split(address, ":")
+		port := addrs[len(addrs)-1]
 
-	locals := strings.Split(localhost, ":")
-	_, err := strconv.Atoi(locals[len(locals)-1])
-	if err == nil {
-		localhost = strings.Join(locals[:len(locals)-1], ":")
-	}
-	localhost = localhost + ":" + port
+		mockIDs := strings.Split(network, ":")
+		localhost := strings.Join(mockIDs[1:], ":") + ":" + port
 
-	// i := atomic.AddInt32(&dialIndex, 1)
-	// localhost := "d" + strconv.Itoa(int(i)) + ":" + port
+		var conn net.Conn
 
-	var conn net.Conn
+		delay := mockDelay(localhost, address)
+		time.Sleep(delay)
 
-	delay := mockDelay(localhost, address)
-	time.Sleep(delay)
+		networkType := "mock"
+		conn = RegistDial(networkType, address, localhost)
 
-	networkType := "tcp"
-	conn = RegistDial(networkType, address, localhost)
+		mc := &mockConn{
+			Conn: conn,
+			LocalAddrVal: mockAddr{
+				network: networkType,
+				address: localhost,
+			},
+			RemoteAddrVal: mockAddr{
+				network: networkType,
+				address: address,
+			},
+			targetID:      address,
+			readDeadline:  -1,
+			writeDeadline: -1,
+		}
 
-	mc := &mockConn{
-		Conn: conn,
-		LocalAddrVal: mockAddr{
-			network: networkType,
-			address: localhost,
-		},
-		RemoteAddrVal: mockAddr{
-			network: networkType,
-			address: address,
-		},
-		targetID:      address,
-		readDeadline:  -1,
-		writeDeadline: -1,
+		return mc, nil
 	}
 
-	return mc, nil
+	return net.Dial(network, address)
 }
 
 // Listen announces on the local network address.
-func Listen(networkType, addr string) (net.Listener, error) {
-	strs := strings.Split(addr, ":")
-	if strs[0] == "" {
-		addr = networkType + addr
+func Listen(network, addr string) (net.Listener, error) {
+	if strings.HasPrefix(network, "mock") {
+		addrs := strings.Split(addr, ":")
+		port := addrs[len(addrs)-1]
+
+		mockIDs := strings.Split(network, ":")
+		localhost := strings.Join(mockIDs[1:], ":") + ":" + port
+
+		log.Info("addr ", localhost)
+
+		var l net.Listener
+
+		ml := mockListener{
+			addr: &mockAddr{
+				network: "mock",
+				address: localhost,
+			},
+		}
+		log.Debug("Listen : ", localhost)
+
+		ml.waitAccept()
+
+		l = &ml
+
+		return l, nil
 	}
-	log.Info("addr ", addr)
 
-	var l net.Listener
-
-	ml := mockListener{
-		addr: &mockAddr{
-			network: networkType,
-			address: addr,
-		},
-	}
-	log.Debug("Listen : ", addr)
-
-	ml.waitAccept()
-
-	l = &ml
-
-	return l, nil
+	return net.Listen(network, addr)
 }
 
 //ConnParam has Reader, Writer, network, address
