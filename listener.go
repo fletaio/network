@@ -5,9 +5,6 @@ import (
 	"sync"
 )
 
-//A Listener is a generic network listener for stream-oriented protocols.
-type Listener net.Listener
-
 type mockListener struct {
 	sync.Mutex
 	addr  net.Addr
@@ -16,7 +13,7 @@ type mockListener struct {
 }
 
 func (l *mockListener) waitAccept() {
-	l.node = RegistAccept(l.addr.String())
+	l.node = registAccept(l.addr.String())
 }
 
 // Accept waits for and returns the next connection to the listener.

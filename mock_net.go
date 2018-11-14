@@ -21,7 +21,7 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 	delay := mockDelay(localhost, address)
 	go func() {
 		time.Sleep(delay)
-		connected <- RegistDial(networkType, address, localhost)
+		connected <- registDial(networkType, address, localhost)
 	}()
 	select {
 	case <-ctx.Done():
@@ -47,8 +47,6 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 
 }
 
-// var dialIndex int32
-
 //Dial is return Conn
 // func Dial(networkType, address string, localhost string) (net.Conn, error) {
 func Dial(network, address string) (net.Conn, error) {
@@ -65,7 +63,7 @@ func Dial(network, address string) (net.Conn, error) {
 		time.Sleep(delay)
 
 		networkType := "mock"
-		conn = RegistDial(networkType, address, localhost)
+		conn = registDial(networkType, address, localhost)
 
 		mc := &mockConn{
 			Conn: conn,
@@ -127,13 +125,12 @@ type ConnParam struct {
 	DialHost    string
 }
 
-//RegistDial is temp store reader and writer
-func RegistDial(networkType, address string, localhost string) net.Conn {
+func registDial(networkType, address string, localhost string) net.Conn {
 	for LoadNodeMap(address).ConnParamChan == nil {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	s, c := net.Pipe()
+	s, c := getConnPair()
 
 	connParam := ConnParam{
 		Conn:        s,
@@ -146,17 +143,17 @@ func RegistDial(networkType, address string, localhost string) net.Conn {
 	return c
 }
 
-//RegistAccept is temp store reader and writer
-func RegistAccept(addr string) (node NodeInfo) {
-	if LoadNodeMap(addr).Address == "" {
-		StoreNodeMap(addr, NodeInfo{
-			Address: addr,
-		})
+func registAccept(addr string) (node NodeInfo) {
+	if addr == "" {
+		return NodeInfo{}
 	}
-
 	node = LoadNodeMap(addr)
-	node.ConnParamChan = make(chan ConnParam, 256)
-	StoreNodeMap(addr, node)
-
+	if node.Address == "" {
+		node = NodeInfo{
+			Address:       addr,
+			ConnParamChan: make(chan ConnParam, 256),
+		}
+		StoreNodeMap(addr, node)
+	}
 	return node
 }

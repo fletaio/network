@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"git.fleta.io/fleta/mocknet/string_util"
@@ -112,4 +113,34 @@ func (c *mockConn) SetReadDeadline(t time.Time) error {
 func (c *mockConn) SetWriteDeadline(t time.Time) error {
 	c.writeDeadline = time.Since(t)
 	return nil
+}
+
+var connLock sync.Mutex
+
+func getConnPair() (net.Conn, net.Conn) {
+	// return net.Pipe()
+	connLock.Lock()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	var s net.Conn
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		s, err = l.Accept()
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+	}()
+	c, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		panic(err)
+	}
+	wg.Wait()
+	l.Close()
+	connLock.Unlock()
+
+	return s, c
 }

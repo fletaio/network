@@ -8,5 +8,5 @@ const (
 //mocknet delay param
 const (
 	Delay     = true
-	DelayUnit = 2 // 1(0~32) 2(0~64) ~
+	DelayUnit = 1 // 1(0~32) 2(0~64) ~
 )
