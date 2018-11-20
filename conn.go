@@ -2,16 +2,11 @@ package mocknet
 
 import (
 	"net"
-	"regexp"
-	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"git.fleta.io/fleta/mocknet/string_util"
-
-	"git.fleta.io/fleta/framework/log"
 )
 
 type mockAddr struct {
@@ -36,7 +31,7 @@ func mockDelay(address string, target string) time.Duration {
 	length := int(((a+b)*DelayUnit)/32) + 1
 
 	delay := time.Duration(0)
-	for i := 1; i < length; i++ {
+	for i := 0; i < length; i++ {
 		a, _ := strconv.ParseInt(string(target[i]), 16, 64)
 		b, _ := strconv.ParseInt(string(address[i]), 16, 64)
 		delay += time.Duration(a+b) / 2
@@ -52,28 +47,8 @@ type mockConn struct {
 	Conn          net.Conn
 	LocalAddrVal  mockAddr
 	RemoteAddrVal mockAddr
-	targetID      string
 	readDeadline  time.Duration
 	writeDeadline time.Duration
-}
-
-func (c *mockConn) Log(format string, msg ...interface{}) {
-	buf := make([]byte, 1<<16)
-	runtime.Stack(buf, true)
-	str := strings.Split(string(buf), "\n")[3]
-
-	re := regexp.MustCompile("mocknet\\.\\(\\*[^\\.]*\\.")
-
-	str = re.ReplaceAllLiteralString(str, "")
-	str = strings.Split(str, "(")[0]
-
-	time := string(append([]byte(time.Now().Format("2006-01-02T15:04:05.999999999")), []byte{48, 48, 48, 48, 48, 48, 48, 48, 48}...)[:30])
-
-	msg = append([]interface{}{time, str, c.LocalAddr(), c.RemoteAddr()}, msg...)
-
-	format = string(append([]byte("mocknet %30s %s %s->%s "), append([]byte(format), []byte("\n")...)...))
-
-	log.Infof(format, msg...)
 }
 
 func (c *mockConn) Read(b []byte) (n int, err error) {

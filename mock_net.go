@@ -21,7 +21,10 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 	delay := mockDelay(localhost, address)
 	go func() {
 		time.Sleep(delay)
-		connected <- registDial(networkType, address, localhost)
+		conn, err := registDial(networkType, address, localhost)
+		if err == nil {
+			connected <- conn
+		}
 	}()
 	select {
 	case <-ctx.Done():
@@ -37,7 +40,6 @@ func DialTimeout(networkType, address string, timeout time.Duration, localhost s
 				network: networkType,
 				address: address,
 			},
-			targetID:      address,
 			readDeadline:  -1,
 			writeDeadline: -1,
 		}
@@ -63,8 +65,10 @@ func Dial(network, address string) (net.Conn, error) {
 		time.Sleep(delay)
 
 		networkType := "mock"
-		conn = registDial(networkType, address, localhost)
-
+		conn, err := registDial(networkType, address, localhost)
+		if err != nil {
+			return nil, err
+		}
 		mc := &mockConn{
 			Conn: conn,
 			LocalAddrVal: mockAddr{
@@ -75,7 +79,6 @@ func Dial(network, address string) (net.Conn, error) {
 				network: networkType,
 				address: address,
 			},
-			targetID:      address,
 			readDeadline:  -1,
 			writeDeadline: -1,
 		}
@@ -95,8 +98,6 @@ func Listen(network, addr string) (net.Listener, error) {
 		mockIDs := strings.Split(network, ":")
 		localhost := strings.Join(mockIDs[1:], ":") + ":" + port
 
-		log.Info("addr ", localhost)
-
 		var l net.Listener
 
 		ml := mockListener{
@@ -105,7 +106,6 @@ func Listen(network, addr string) (net.Listener, error) {
 				address: localhost,
 			},
 		}
-		log.Debug("Listen : ", localhost)
 
 		ml.waitAccept()
 
@@ -125,9 +125,14 @@ type ConnParam struct {
 	DialHost    string
 }
 
-func registDial(networkType, address string, localhost string) net.Conn {
+func registDial(networkType, address string, localhost string) (net.Conn, error) {
+	count := 0
 	for LoadNodeMap(address).ConnParamChan == nil {
 		time.Sleep(100 * time.Millisecond)
+		count++
+		if count > 10*5 {
+			return nil, ErrDialTimeout
+		}
 	}
 
 	s, c := getConnPair()
@@ -140,10 +145,11 @@ func registDial(networkType, address string, localhost string) net.Conn {
 	}
 	LoadNodeMap(address).ConnParamChan <- connParam
 
-	return c
+	return c, nil
 }
 
 func registAccept(addr string) (node NodeInfo) {
+	log.Debug("registAccept ", addr)
 	if addr == "" {
 		return NodeInfo{}
 	}

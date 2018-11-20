@@ -1,10 +1,5 @@
 package mocknet
 
-//simulation init count of node
-const (
-	InitNodeCount = 1
-)
-
 //mocknet delay param
 const (
 	Delay     = true
