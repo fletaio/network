@@ -1,4 +1,4 @@
-package mocknet
+package network
 
 //mock network errors
 var (

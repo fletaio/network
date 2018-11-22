@@ -1,4 +1,4 @@
-package mocknet
+package network
 
 import (
 	"fmt"

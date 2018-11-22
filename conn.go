@@ -1,4 +1,4 @@
-package mocknet
+package network
 
 import (
 	"net"
@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/mocknet/string_util"
+	"git.fleta.io/fleta/network/string_util"
 )
 
 type mockAddr struct {

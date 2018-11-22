@@ -1,4 +1,4 @@
-package mocknet
+package network
 
 //mocknet delay param
 const (
