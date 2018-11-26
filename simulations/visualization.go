@@ -32,7 +32,7 @@ var receiver chan<- Msg
 func VisualizationStart(nodeAdder chan<- Msg) {
 	http.HandleFunc("/ws", wsHandler)
 	// http.HandleFunc("/", rootHandler)
-	http.Handle("/", http.FileServer(http.Dir("./git.fleta.io/fleta/mocknet/simulations/html/")))
+	http.Handle("/", http.FileServer(http.Dir("./git.fleta.io/fleta/network/simulations/html/")))
 
 	data := make(chan Visualization)
 	sender = data
@@ -69,7 +69,7 @@ func AddVisualizationData(nodeID string, dataName string, dataFunc func() []stri
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	pwd, _ := os.Getwd()
-	content, err := ioutil.ReadFile(pwd + "/git.fleta.io/fleta/mocknet/simulations/html/index.html")
+	content, err := ioutil.ReadFile(pwd + "/git.fleta.io/fleta/network/simulations/html/index.html")
 	if err != nil {
 		fmt.Println("Could not open file.", err)
 	}
