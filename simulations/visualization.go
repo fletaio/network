@@ -5,6 +5,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,6 +20,7 @@ type Msg struct {
 }
 
 var dataFuncs map[string]map[string]func() []string
+var dataFuncsLock sync.Mutex
 
 func init() {
 	dataFuncs = map[string]map[string]func() []string{}
@@ -29,10 +33,22 @@ var sender <-chan Visualization
 var receiver chan<- Msg
 
 //VisualizationStart is start the visualization
-func VisualizationStart(nodeAdder chan<- Msg) {
+func VisualizationStart(nodeAdder chan<- Msg, port int) {
 	http.HandleFunc("/ws", wsHandler)
 	// http.HandleFunc("/", rootHandler)
-	http.Handle("/", http.FileServer(http.Dir("./git.fleta.io/fleta/network/simulations/html/")))
+
+	var file string
+	{
+		pc := make([]uintptr, 10) // at least 1 entry needed
+		runtime.Callers(1, pc)
+		f := runtime.FuncForPC(pc[0])
+		file, _ = f.FileLine(pc[0])
+
+		path := strings.Split(file, "/")
+		file = strings.Join(path[:len(path)-1], "/")
+	}
+
+	http.Handle("/", http.FileServer(http.Dir(fmt.Sprintf("%v/html/", file))))
 
 	data := make(chan Visualization)
 	sender = data
@@ -41,6 +57,7 @@ func VisualizationStart(nodeAdder chan<- Msg) {
 	go func() {
 		for {
 			sendData := make(map[string]map[string][]string)
+			dataFuncsLock.Lock()
 			for nodeID, node := range dataFuncs {
 				nodeData := map[string][]string{}
 				for dataName, f := range node {
@@ -49,16 +66,20 @@ func VisualizationStart(nodeAdder chan<- Msg) {
 				sendData[nodeID] = nodeData
 
 			}
+			dataFuncsLock.Unlock()
 			data <- sendData
 			time.Sleep(time.Second)
 		}
 	}()
 
-	panic(http.ListenAndServe(":8080", nil))
+	panic(http.ListenAndServe(fmt.Sprintf(":%v", port), nil))
 }
 
 //AddVisualizationData adds a function that returns visualization data.
 func AddVisualizationData(nodeID string, dataName string, dataFunc func() []string) {
+	dataFuncsLock.Lock()
+	defer dataFuncsLock.Unlock()
+
 	node, has := dataFuncs[nodeID]
 	if !has {
 		node = map[string]func() []string{}
