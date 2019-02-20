@@ -10,7 +10,7 @@ type NodeInfo struct {
 	ConnParamChan chan ConnParam
 }
 
-//Addr TODO
+//Addr is returns a address of node
 func (n *NodeInfo) Addr() string {
 	return n.Address
 }
