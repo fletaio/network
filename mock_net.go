@@ -10,42 +10,51 @@ import (
 )
 
 //DialTimeout is return Conn
-func DialTimeout(networkType, address string, timeout time.Duration, localhost string) (net.Conn, error) {
-	connected := make(chan net.Conn)
+func DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+	if strings.HasPrefix(network, "mock") {
+		connected := make(chan net.Conn)
 
-	now := time.Now()
-	earliest := now.Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), earliest)
-	defer cancel()
+		addrs := strings.Split(address, ":")
+		port := addrs[len(addrs)-1]
 
-	delay := mockDelay(localhost, address)
-	go func() {
-		time.Sleep(delay)
-		conn, err := registDial(networkType, address, localhost)
-		if err == nil {
-			connected <- conn
+		mockIDs := strings.Split(network, ":")
+		localhost := strings.Join(mockIDs[1:], ":") + ":" + port
+
+		now := time.Now()
+		earliest := now.Add(timeout)
+		ctx, cancel := context.WithDeadline(context.Background(), earliest)
+		defer cancel()
+
+		delay := mockDelay(localhost, address)
+		go func() {
+			time.Sleep(delay)
+			conn, err := registDial(network, address, localhost)
+			if err == nil {
+				connected <- conn
+			}
+		}()
+		select {
+		case <-ctx.Done():
+			return nil, ErrDialTimeout
+		case conn := <-connected:
+			mc := &mockConn{
+				Conn: conn,
+				LocalAddrVal: mockAddr{
+					network: network,
+					address: localhost,
+				},
+				RemoteAddrVal: mockAddr{
+					network: network,
+					address: address,
+				},
+				readDeadline:  -1,
+				writeDeadline: -1,
+			}
+
+			return mc, nil
 		}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ErrDialTimeout
-	case conn := <-connected:
-		mc := &mockConn{
-			Conn: conn,
-			LocalAddrVal: mockAddr{
-				network: networkType,
-				address: localhost,
-			},
-			RemoteAddrVal: mockAddr{
-				network: networkType,
-				address: address,
-			},
-			readDeadline:  -1,
-			writeDeadline: -1,
-		}
-
-		return mc, nil
 	}
+	return net.DialTimeout(network, address, timeout)
 
 }
 
