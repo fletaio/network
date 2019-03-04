@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/framework/log"
 )
 
 //DialTimeout is return Conn

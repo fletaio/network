@@ -90,7 +90,7 @@ func AddVisualizationData(nodeID string, dataName string, dataFunc func() []stri
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	pwd, _ := os.Getwd()
-	content, err := ioutil.ReadFile(pwd + "/git.fleta.io/fleta/network/simulations/html/index.html")
+	content, err := ioutil.ReadFile(pwd + "/github.com/fletaio/network/simulations/html/index.html")
 	if err != nil {
 		fmt.Println("Could not open file.", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/network/string_util"
+	"git.fleta.igithub.com/fletaio/ing_util"
 )
 
 type mockAddr struct {
