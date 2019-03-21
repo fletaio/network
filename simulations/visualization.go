@@ -5,8 +5,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -37,18 +35,24 @@ func VisualizationStart(nodeAdder chan<- Msg, port int) {
 	http.HandleFunc("/ws", wsHandler)
 	// http.HandleFunc("/", rootHandler)
 
-	var file string
-	{
-		pc := make([]uintptr, 10) // at least 1 entry needed
-		runtime.Callers(1, pc)
-		f := runtime.FuncForPC(pc[0])
-		file, _ = f.FileLine(pc[0])
+	// var file string
+	// {
+	// 	pc := make([]uintptr, 10) // at least 1 entry needed
+	// 	runtime.Callers(1, pc)
+	// 	f := runtime.FuncForPC(pc[0])
+	// 	file, _ = f.FileLine(pc[0])
 
-		path := strings.Split(file, "/")
-		file = strings.Join(path[:len(path)-1], "/")
-	}
+	// 	path := strings.Split(file, "/")
+	// 	file = strings.Join(path[:len(path)-1], "/")
 
-	http.Handle("/", http.FileServer(http.Dir(fmt.Sprintf("%v/html/", file))))
+	// 	var fs http.FileSystem = http.Dir(fmt.Sprintf("%v/html/", file))
+	// 	err := vfsgen.Generate(fs, vfsgen.Options{})
+	// 	if err != nil {
+	// 		log.Fatalln(err)
+	// 	}
+	// }
+
+	http.Handle("/", http.FileServer(networkSimulationsAssets))
 
 	data := make(chan Visualization)
 	sender = data
