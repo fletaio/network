@@ -92,30 +92,31 @@ func (c *mockConn) SetWriteDeadline(t time.Time) error {
 
 var connLock sync.Mutex
 
-func getConnPair() (net.Conn, net.Conn) {
+func getConnPair() (net.Conn, net.Conn, error) {
 	// return net.Pipe()
 	connLock.Lock()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	var s net.Conn
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	var errAccept error
 	go func() {
-		s, err = l.Accept()
-		if err != nil {
-			panic(err)
-		}
+		s, errAccept = l.Accept()
 		wg.Done()
 	}()
 	c, err := net.Dial("tcp", l.Addr().String())
 	if err != nil {
-		panic(err)
+		return nil, nil, err
+	}
+	if errAccept != nil {
+		return nil, nil, err
 	}
 	wg.Wait()
 	l.Close()
 	connLock.Unlock()
 
-	return s, c
+	return s, c, nil
 }

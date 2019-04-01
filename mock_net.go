@@ -144,7 +144,10 @@ func registDial(networkType, address string, localhost string) (net.Conn, error)
 		}
 	}
 
-	s, c := getConnPair()
+	s, c, err := getConnPair()
+	if err != nil {
+		return nil, err
+	}
 
 	connParam := ConnParam{
 		Conn:        s,
